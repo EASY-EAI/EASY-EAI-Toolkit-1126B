@@ -31,12 +31,12 @@
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 static SrcCfg_t SrcCfg_tab[] = {
 	{
-		.loaction  = "/dev/video45",
+		.loaction  = "/dev/video22",
 		.videoDesc = {"NV12", FALSE, 1920, 1080, 30, 0, "h264"},
 		.audioDstType = "null",
 
 	}, {
-		.loaction  = "/dev/video39",
+		.loaction  = "/dev/video30",
 		.videoDesc = {"NV12", FALSE, 1920, 1080, 30, 0, "h265"},
 		.audioDstType = "null",
     }
@@ -113,7 +113,7 @@ int main(int argc, char **argv)
     
     g_main_loop_run(loop);
     
-	return 0;
+    return 0;
 }
 
 
