@@ -23,6 +23,14 @@ How to use：
 
 important update log:
 ---
+> 2025-11-10 :
+> * Release EASY-EAI-Toolkit-1126B-0.0.3
+> * update easyeai-api
+>     * algorithm_api
+>         * [new] lpr
+> * update Demo
+>     * [new] algorithm-lpr
+>
 > 2025-09-16 :
 > * Release EASY-EAI-Toolkit-1126B-0.0.2
 > * update easyeai-api

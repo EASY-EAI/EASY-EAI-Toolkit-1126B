@@ -22,6 +22,14 @@
 
 重要更新：
 ---
+> 2025-11-10 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.0.3
+> * 更新 easyeai-api
+>     * 算法组件api
+>         * [新增] lpr
+> * 新增【Api单例】
+>     * [新增] algorithm-lpr
+>
 > 2025-09-16 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.0.2
 > * 更新 easyeai-api

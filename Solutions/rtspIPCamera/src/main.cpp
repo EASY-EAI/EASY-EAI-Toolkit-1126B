@@ -31,13 +31,13 @@
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 static SrcCfg_t SrcCfg_tab[] = {
 	{
-		.loaction  = "/dev/video22",
+		.loaction  = "/dev/video23",
 		.videoDesc = {"NV12", FALSE, 1920, 1080, 30, 0, "h264"},
 		.audioDstType = "null",
 
 	}, {
-		.loaction  = "/dev/video30",
-		.videoDesc = {"NV12", FALSE, 1920, 1080, 30, 0, "h265"},
+		.loaction  = "/dev/video31",
+		.videoDesc = {"NV12", FALSE, 1920, 1080, 30, 0, "h264"},
 		.audioDstType = "null",
     }
 };
