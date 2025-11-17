@@ -1,4 +1,4 @@
-﻿#ifndef __LPR_CLASSIFIER_H__
+#ifndef __LPR_CLASSIFIER_H__
 #define __LPR_CLASSIFIER_H__
 
 #include "rknn_api.h"
