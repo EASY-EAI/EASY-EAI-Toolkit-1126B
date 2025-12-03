@@ -22,6 +22,20 @@
 
 重要更新：
 ---
+> 2025-12-03 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.0.4
+> * 更新 easyeai-api
+>     * 算法组件api
+>         * [更新] person_detect
+>         * [更新] helmet_detect
+>         * [更新] fire_detect
+>         * [更新] car_detect
+>         * [新增] geometry
+>     * 多媒体组件api
+>         * [新增] jpeg
+> * 新增【开发实例】
+>     * [新增] AOV(always on video)
+>
 > 2025-11-10 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.0.3
 > * 更新 easyeai-api

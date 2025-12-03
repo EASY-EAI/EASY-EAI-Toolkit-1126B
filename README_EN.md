@@ -23,6 +23,20 @@ How to use：
 
 important update log:
 ---
+> 2025-12-03 :
+> * Release EASY-EAI-Toolkit-1126B-0.0.4
+> * update easyeai-api
+>     * algorithm_api
+>         * [update] person_detect
+>         * [update] helmet_detect
+>         * [update] fire_detect
+>         * [update] car_detect
+>         * [new] geometry
+>     * media_api
+>         * [new] jpeg
+> * update Solution
+>     * [new] AOV(always on video)
+>
 > 2025-11-10 :
 > * Release EASY-EAI-Toolkit-1126B-0.0.3
 > * update easyeai-api
