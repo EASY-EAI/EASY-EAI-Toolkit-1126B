@@ -22,6 +22,12 @@
 
 重要更新：
 ---
+> 2025-12-15 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.0.5
+> * 更新 easyeai-api
+>     * 算法组件api
+>         * [新增] face_landmark98
+>
 > 2025-12-03 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.0.4
 > * 更新 easyeai-api

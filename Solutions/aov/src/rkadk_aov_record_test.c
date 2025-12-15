@@ -27,7 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
+#include <error.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <linux/rtnetlink.h>
@@ -814,16 +814,14 @@ record:
          "peress any other key to quit\n");
 
   while (!is_quit) {
-        printf("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
     if (loopCount >= 0) {
-        printf("00000000000000000000000000000\n");
       sleep(loopDuration);
       if (loopCount == 0) {
         RKADK_LOGP("loop switch end!");
         is_quit = true;
         goto __EXIT;
       }
-        printf("111111111111111111111111111111\n");
+
       RKADK_PARAM_GetCamParam(s32CamId, RKADK_PARAM_TYPE_RECORD_TYPE, &enRecType);
       if (enRecType == RKADK_REC_TYPE_NORMAL) {
         enRecType = RKADK_REC_TYPE_AOV_LAPSE;
@@ -832,13 +830,11 @@ record:
         printf("\n\n\n----- switch normal record[%d] -----\n", loopCount);
         enRecType = RKADK_REC_TYPE_NORMAL;
       }
-        printf("222222222222222222222222222222222\n");
 
       RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_RECORD_TYPE, &enRecType);
       RKADK_RECORD_Reset(&pRecorder);
       RKADK_RECORD_FileCacheSetMode(enRecType);
       RKADK_RECORD_Start(pRecorder);
-        printf("333333333333333333333333333333333\n");
 
       loopCount--;
     } else {
