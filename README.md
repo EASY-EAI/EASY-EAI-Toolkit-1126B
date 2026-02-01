@@ -22,6 +22,14 @@
 
 重要更新：
 ---
+> 2026-02-01 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.0.6
+> * 更新 easyeai-api
+>     * 算法组件api
+>         * [新增] gestures
+> * 新增【Api单例】
+>     * [新增] algorithm-gestures
+>
 > 2025-12-15 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.0.5
 > * 更新 easyeai-api
