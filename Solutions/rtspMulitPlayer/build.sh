@@ -15,9 +15,10 @@ warring() {
 	echo " "
 }
 
+# clear
 if [ "$1" = "clear" ]; then
 	rm -rf build
-	rm -rf Release
+	rm Release/$CUR_DIR_NAME -f
 	exit 0
 fi
 
@@ -31,6 +32,9 @@ mkdir -p "../Release" && cp $CUR_DIR_NAME "../Release"
 chmod 777 ../Release -R
 
 ## copy to Board
-mkdir -p $SYSROOT/userdata/Solu/
-cp ../Release/* $SYSROOT/userdata/Solu
-exit 0
+mkdir -p $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+if [ "$1" = "cpres" ]; then
+	cp ../Release/* $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+else
+	cp ../Release/$CUR_DIR_NAME $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+fi

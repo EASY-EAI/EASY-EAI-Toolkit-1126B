@@ -33,6 +33,7 @@ include (${common_root}/system_opt/api.cmake)
 include (${common_root}/log_manager/api.cmake)
 include (${meida_root}/rga/api.cmake)
 include (${meida_root}/gst_opt/api.cmake)
+include (${algorithm_root}/person_detect/api.cmake)
 ## api头文件路径
 set(api_inc 
     ${BASE64_INCLUDE_DIRS} 
@@ -40,6 +41,7 @@ set(api_inc
     ${LOGMANAGER_INCLUDE_DIRS} 
     ${RGA_INCLUDE_DIRS} 
     ${GSTOPT_INCLUDE_DIRS} 
+    ${PERSON_DETECT_INCLUDE_DIRS} 
     )
 ## api源文件路径
 file(GLOB api_srcs 
@@ -51,6 +53,7 @@ file(GLOB api_srcs
 link_directories(
     ${LOGMANAGER_LIBS_DIRS} 
     ${GSTOPT_LIBS_DIRS} 
+    ${PERSON_DETECT_LIBS_DIRS} 
 )
 ## api所依赖的库参数
 set(sysLib_list 
@@ -59,6 +62,7 @@ set(sysLib_list
     ${LOGMANAGER_LIBS} 
     ${RGA_LIBS} 
     ${GSTOPT_LIBS} 
+    ${PERSON_DETECT_LIBS} 
     )
 # ======================== easyeai_api =========================
 
@@ -97,6 +101,7 @@ set(sysLib_list
 # -I
 set(custom_inc
     ${CMAKE_SYSROOT}/usr/include/ 
+    ${CMAKE_SYSROOT}/usr/include/drm 
     ${CMAKE_SYSROOT}/usr/include/opencv4/ 
     #${GTK3_INCLUDE_DIRS} 
     #${GST1.0_INCLUDE_DIRS} 
@@ -111,6 +116,7 @@ link_directories(
 )
 # -l
 set(custom_libs
+    drm 
     rga 
     opencv_core 
     opencv_imgproc 
@@ -126,11 +132,11 @@ aux_source_directory(./src/analyzer dir_srcs)
 aux_source_directory(./src/player dir_srcs)
 # ========================== custom ============================
 
-
 #--------------------------
 # execute file
 #--------------------------
 add_executable(${CURRENT_FOLDER} ${dir_srcs} ${api_srcs})   #-o
 target_include_directories(${CURRENT_FOLDER} PRIVATE ${custom_inc} ${api_inc})
 target_link_libraries(${CURRENT_FOLDER} ${custom_libs} ${sysLib_list})
+
 

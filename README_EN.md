@@ -23,6 +23,12 @@ How to use：
 
 important update log:
 ---
+> 2026-03-13 :
+> * Release EASY-EAI-Toolkit-1126B-0.0.7
+> * update Solution
+>     * [update] rtspMulitPlayer
+>     * [new] detect-Person
+>
 > 2026-02-01 :
 > * Release EASY-EAI-Toolkit-1126B-0.0.6
 > * update easyeai-api

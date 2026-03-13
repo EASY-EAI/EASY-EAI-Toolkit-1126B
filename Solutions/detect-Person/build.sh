@@ -6,21 +6,35 @@ SHELL_FOLDER=$(cd "$(dirname "$0")";pwd)
 cd $SHELL_FOLDER
 
 CUR_DIR_NAME=`basename "$SHELL_FOLDER"`
+warring() {
+	echo "DESCRIPTION"
+	echo "EASYEAI-1126B Solution Project."
+	echo " "
+	echo "./build.sh       : build solution"
+	echo "./build.sh clear : clear all compiled files(just preserve source code)"
+	echo " "
+}
 
+# clear
 if [ "$1" = "clear" ]; then
 	rm -rf build
-	rm -rf Release
+	rm Release/$CUR_DIR_NAME -f
 	exit 0
 fi
 
-rm -rf build
-mkdir build
-cd build
+# build this project
+rm -rf build && mkdir build && cd build
 cmake ..
 make -j24
 
-mkdir -p "../Release" && cp detect-* "../Release"
+# make Release files
+chmod 777 $CUR_DIR_NAME
+mkdir -p "../Release" && cp $CUR_DIR_NAME "../Release"
 
-# release
-chmod 777 ../Release/detect-*
-cp ../Release/detect-* $SYSROOT/userdata
+## copy to Board
+mkdir -p $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+if [ "$1" = "cpres" ]; then
+	cp ../Release/* $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+else
+	cp ../Release/$CUR_DIR_NAME $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+fi

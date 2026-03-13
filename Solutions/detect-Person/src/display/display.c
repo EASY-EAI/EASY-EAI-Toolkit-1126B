@@ -393,6 +393,8 @@ static int init_drm(Display_dev_t *pDisplay)
 static void unInit_drm(Display_dev_t *pDisplay)
 {
     printf("\n清理资源...\n");
+    if(NULL==pDisplay)
+        return ;
     
     if (pDisplay->primary.pFramebuffer && pDisplay->primary.pFramebuffer != MAP_FAILED) {
         munmap(pDisplay->primary.pFramebuffer, pDisplay->primary.fbSize);

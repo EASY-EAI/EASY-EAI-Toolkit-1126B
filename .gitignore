@@ -15,7 +15,8 @@ cmake-out/
 # project files
 prj/
 Demos/*/Release/test-*
-Solutions/*/Release
+Solutions/*/Release/*
+!Solutions/*/Release/*.jpg
 Solutions/*/package/*/userdata
 Solutions/*/package/*.deb
 .qmake.stash

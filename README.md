@@ -22,6 +22,12 @@
 
 重要更新：
 ---
+> 2026-03-13 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.0.7
+> * 新增【开发实例】
+>     * [更新] rtspMulitPlayer
+>     * [新增] detect-Person
+>
 > 2026-02-01 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.0.6
 > * 更新 easyeai-api

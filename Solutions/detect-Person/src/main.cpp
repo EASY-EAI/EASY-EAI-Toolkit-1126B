@@ -5,8 +5,8 @@
 #include "font_engine.h"
 #include "rga_wrapper.h"
 
-#include "camera.h"
-#include "display.h"
+#include "camera/camera.h"
+#include "display/display.h"
 #include "person_detect.h"
 
 using namespace std;
@@ -119,14 +119,6 @@ int main(int argc, char **argv)
 	int skip = 0;
 	char *pbuf = NULL;
 	Mat image;
-    
-#if 0
-	// 初始化字体透明度和颜色
-	FontColor color = {200, 135, 189, 67};    // {A, R, G, B};
-	// 创建全局字体
-	global_font_create("./simhei.ttf", CODE_UTF8);
-	global_font_set_fontSize(80);
-#endif
 
     // 1.初始化显示屏
     int width, height;
@@ -209,11 +201,6 @@ int main(int argc, char **argv)
     		*/
     		plot_one_box(image, x1, x2, y1, y2, text, i%10);
 		}
-        
-        //memset(timestamp, 0, sizeof(timestamp));
-        //sprintf(timestamp,"%lu", get_timeval_ms());
-        //printf("%s\n",timestamp);
-        //putText((uint8_t *)image.data, CAMERA_WIDTH, CAMERA_HEIGHT, timestamp, 210, 540, color);
         
         disp_commit(image.data, CAMERA_WIDTH, CAMERA_HEIGHT, HAL_TRANSFORM_ROT_270);
         usleep(15*1000); //15ms

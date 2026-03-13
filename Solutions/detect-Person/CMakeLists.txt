@@ -30,8 +30,8 @@ include (${common_root}/base64/api.cmake)
 include (${common_root}/system_opt/api.cmake)
 include (${common_root}/log_manager/api.cmake)
 include (${common_root}/font_engine/api.cmake)
-include (${algorithm_root}/person_detect/api.cmake)
 include (${meida_root}/rga/api.cmake)
+include (${algorithm_root}/person_detect/api.cmake)
 ## api头文件路径
 set(api_inc 
     ${BASE64_INCLUDE_DIRS} 
@@ -71,7 +71,6 @@ set(sysLib_list
 # -I
 set(custom_inc 
     ${CMAKE_SYSROOT}/usr/include/drm
-    ${CMAKE_CURRENT_SOURCE_DIR}/commonApi
 )
 # -L
 #link_directories(
@@ -92,7 +91,8 @@ set(custom_libs
 )
 # source code
 aux_source_directory(./src dir_srcs)
-aux_source_directory(./commonApi dir_srcs)
+aux_source_directory(./src/camera dir_srcs)
+aux_source_directory(./src/display dir_srcs)
 # ========================== custom ============================
 
 #--------------------------
