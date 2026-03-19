@@ -8,7 +8,6 @@
 //=====================  PRJ  =====================
 #include "capturer/capturer.h"
 #include "analyzer/analyzer.h"
-#include "player/display.h"
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 static const SrcCfg_t SrcCfg_tab[] = {
@@ -45,9 +44,13 @@ static const SrcCfg_t SrcCfg_tab[] = {
 int main(int argc, char **argv)
 {
     int ret = -1;
+    int chnNums = ARRAY_SIZE(SrcCfg_tab);
+    if(chnNums <= 0){
+        return -1;
+    }
     
     /* Initialize algotithm model */
-    ret = analyzer_init();
+    ret = analyzer_init(chnNums);
     if(0 != ret){
         printf("Initialize algotithm model faild ! ret = %d\n", ret);
         return ret;
@@ -64,11 +67,6 @@ int main(int argc, char **argv)
 
     /* Initialize GStreamer */
     gst_init(&argc, &argv);
-
-    int chnNums = ARRAY_SIZE(SrcCfg_tab);
-    if(chnNums <= 0){
-        return -1;
-    }
     
     Capturer *pCapturer[32] = {NULL};
     for(int i = 0; i <chnNums; i++) {

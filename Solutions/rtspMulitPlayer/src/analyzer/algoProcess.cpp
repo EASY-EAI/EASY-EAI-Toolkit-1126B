@@ -5,38 +5,53 @@
 //=====================  PRJ  =====================
 #include "algoProcess.h"
 
+static bool g_Algorithm_is_NotReady = true;
+
+//static rknn_context gPersonCtx;
 
 int algorithm_init()
 {
+	//person_detect_init(&gPersonCtx, "person_detect.model");
 
+
+    g_Algorithm_is_NotReady = false;
     return 0;
 }
 
-int algorithm_process(int chnId, Mat image)
+ChnResult_t algorithm_process(int chnId, Mat image)
 {
-    static int skipImg = 10; //跳过前10张图片
-    static int skipImg2 = 10; //跳过前10张图片
-
-    //测试用：如果有[通道0]的图像过来，就存下一帧，看看是否正常
-    if(0==chnId){
-        printf("--[chn%d]-------------------- %d ----------------------\n",chnId,skipImg);
-        if(skipImg == 0){
-            imwrite("test_img_0.jpg", image);
-        }
+    //int ret = 0;
+    ChnResult_t chnResult={0};
     
-        skipImg--;
-    }
+    int resultNum = 0;
+    detect_result_group_t detect_result_group = {0};
 
-    //测试用：如果有[通道1]的图像过来，就存下一帧，看看是否正常
-    if(1==chnId){
-        printf("--[chn%d]-------------------- %d ----------------------\n",chnId,skipImg);
-        if(skipImg2 == 0){
-            imwrite("test_img_1.jpg", image);
-        }
+    // 模型未加载完成，不进行目标检测等操作
+    if(g_Algorithm_is_NotReady){
+		usleep(1000);
+		return chnResult;
+    }
+    // 目标检测正式开始:
+    // ==========================================================================================
+	//ret = person_detect_run(gPersonCtx, image, &detect_result_group);
+    //if(0 != ret){
+	//	usleep(1000);
+	//	return chnResult;
+    //}
     
-        skipImg2--;
-    }
+	resultNum = detect_result_group.count;
+	if(resultNum <= 0){
+        //memset(&chnResult.algoRes[0], 0, sizeof(AlgoRes_t));
+		usleep(1000);
+		return chnResult;
+	}
+	
+	printf("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    printf("===[channel]--[%d]:\n", chnId);
+	printf("============person number : %d\n", resultNum);
+    chnResult.algoRes[0].resNumber = resultNum;
+    memcpy(&chnResult.algoRes[0].detect_Group, &detect_result_group, sizeof(detect_result_group));
 
-    return 0;
+    return chnResult;
 }
 

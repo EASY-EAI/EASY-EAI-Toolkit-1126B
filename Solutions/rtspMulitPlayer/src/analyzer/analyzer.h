@@ -10,16 +10,15 @@
 #include "algoProcess.h"
 
 
-
 typedef struct {
     //char fmt[16];
     cv::Mat image;
     pthread_rwlock_t imgLock;
     int chnId;
-    int result;
+    ChnResult_t chnResult;
 }vChnObject;
 
-extern int analyzer_init();
+extern int analyzer_init(int32_t maxChn);
 
 typedef struct {
     char fmt[16];
