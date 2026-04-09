@@ -4,9 +4,12 @@
 ##
 
 INCLUDEPATH += \
-    $$PWD/
+    $$PWD/ \
+    $$PWD/player/ \
 
 SOURCES += \
+    $$PWD/player/player.cpp \
 
 HEADERS += \
     $$PWD/system.h \
+    $$PWD/player/player.h \

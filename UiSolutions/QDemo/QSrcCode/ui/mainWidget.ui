@@ -50,9 +50,7 @@
    <item>
     <widget class="QFrame" name="mpBgFrame">
      <property name="styleSheet">
-      <string notr="true">QFrame#mpBgFrame{
-	border-image: url(:/image/background.png);
-}</string>
+      <string notr="true"/>
      </property>
      <property name="frameShape">
       <enum>QFrame::StyledPanel</enum>

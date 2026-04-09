@@ -4,11 +4,14 @@
 #include <opencv2/opencv.hpp>
 
 #include "system.h"
+#include "player.h"
 
 #include "mainWidget.h"
 
 int main(int argc, char *argv[])
 {
+    mainThread_start();
+
     QApplication a(argc, argv);
 
     QTextCodec *codec = QTextCodec::codecForName("GBK");

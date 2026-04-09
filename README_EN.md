@@ -23,6 +23,14 @@ How to use：
 
 important update log:
 ---
+> 2026-04-09 :
+> * Release EASY-EAI-Toolkit-1126B-0.0.8
+> * update easyeai-api
+>     * media_api
+>         * [new] display
+> * update UiSolution
+>     * [update] QDemo
+>
 > 2026-03-13 :
 > * Release EASY-EAI-Toolkit-1126B-0.0.7
 > * update Solution
