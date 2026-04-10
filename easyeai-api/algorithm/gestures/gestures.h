@@ -46,7 +46,7 @@ extern "C" {
     * @param[in]		image			        待识别图片
 	* @param[in]		conf_threshold		    gestures目标检测置信度
 	* @param[in]		nms_threshold		    gestures非最大抑制阈值
-	* @return									模型初始化结果，0成功，负值失败
+	* @return										 gestures检测结果
 	*/
     std::vector<rknn_gestures_result_t> gestures_run(rknn_gestures_context_t &gestures, cv::Mat image, float conf_threshold, float nms_threshold);
 

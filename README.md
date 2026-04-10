@@ -22,6 +22,14 @@
 
 重要更新：
 ---
+> 2026-04-10 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.0.9
+> * 更新 easyeai-api
+>     * 算法组件api
+>         * [新增] bsd
+> * 新增【Api单例】
+>     * [新增] algorithm-bsd
+>
 > 2026-04-09 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.0.8
 > * 更新 easyeai-api
