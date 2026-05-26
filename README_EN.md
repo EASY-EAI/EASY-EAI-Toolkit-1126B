@@ -23,10 +23,27 @@ How to use：
 
 important update log:
 ---
+> 2026-05-26 :
+> * Release EASY-EAI-Toolkit-1126B-0.1.2
+> * update easyeai-api
+>     * common_api
+>         * [new] data_queue
+>     * netProtocol_api
+>         * [new] rtsp
+>     * media_api
+>         * [new] rockit_adapter
+>         * [new] sdcard_recorder
+>         * [remove] rk_mpi
+>         * [remove] rkadk
+> * update Solution
+>     * [update] aov
+>     * [new] avs
+>     * [new] aiisp(black light)
+>
 > 2026-05-08 :
 > * Release EASY-EAI-Toolkit-1126B-0.1.1
 > * update easyeai-api
->     * 多媒体组件api
+>     * media_api
 >         * [update] display
 > * update Demo
 >     * [new] media-rga

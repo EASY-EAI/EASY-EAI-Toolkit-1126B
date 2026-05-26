@@ -1,973 +1,368 @@
-/*
- * Copyright (c) 2021 Rockchip, Inc. All Rights Reserved.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
-
-#include "rkadk_common.h"
-#include "rkadk_media_comm.h"
-#include "rkadk_log.h"
-#include "rkadk_param.h"
-#include "rkadk_record.h"
-#include "rkadk_osd.h"
-#include "isp/sample_isp.h"
 #include <getopt.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <error.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <linux/rtnetlink.h>
-#include <sys/mount.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#ifdef ENABLE_AOV
-#include "rkadk_aov.h"
-#endif
 
-extern int optind;
-extern char *optarg;
+#include "rk_comm_video.h"
+#include "aov_runner.h"
 
-static RKADK_CHAR optstr[] = "a:I:p:m:S:c:t:o:x:y:W:H:kdh";
-
-#define MAX_LINE_SIZE 256
-#define MAX_NL_BUF_SIZE (1024 * 16)
-#define MOUNT_PATH "/mnt/sdcard"
-
-#define SDCARD_DRIVER "/sys/bus/platform/drivers/dwmmc_rockchip"
-
-#ifdef RV1126_1109
-#define MOUNT_DEV_1 "/dev/mmcblk2p1"
-#define MOUNT_DEV_2 "/dev/mmcblk2"
-#else
-#define MOUNT_DEV_1 "/dev/mmcblk1p1"
-#define MOUNT_DEV_2 "/dev/mmcblk1"
-#endif
-
-#ifdef RV1126_1109
-#define MAX_SELECT_TIMEOUT (2 * 1000 * 1000)
-#define SDCARD_DEVICE "ffc60000.dwmmc"
-#define SDCARD_BIND_DONE "bind@/devices/platform/ffc60000.dwmmc/mmc_host/mmc2/mmc2:b368"
-#define SDCARD_UNBIND_DONE "unbind@/devices/platform/ffc60000.dwmmc"
-#elif defined(RV1106_1103)
-#define MAX_SELECT_TIMEOUT (2 * 1000 * 1000)
-#define SDCARD_DEVICE "ffaa0000.mmc"
-#define SDCARD_DRIVER_PREPARED "bind@/devices/platform/ffaa0000.mmc"
-#define SDCARD_BIND_DONE "bind@/devices/platform/ffaa0000.mmc/mmc_host/mmc1/mmc1"
-#define SDCARD_UNBIND_DONE "unbind@/devices/platform/ffaa0000.mmc"
-#else
-#define MAX_SELECT_TIMEOUT (5 * 1000 * 1000)
-#define SDCARD_DEVICE "21d60000.mmc"
-#define SDCARD_DRIVER_PREPARED "bind@/devices/platform/21d60000.mmc"
-#define SDCARD_BIND_DONE "bind@/devices/platform/21d60000.mmc/mmc_host/mmc1/mmc1"
-#define SDCARD_UNBIND_DONE "unbind@/devices/platform/21d60000.mmc"
-#endif
-
-
-static bool is_quit = false;
 #define IQ_FILE_PATH "/etc/iqfiles"
+#define DEFAULT_REC_DIR "/mnt/sdcard/video"
+#define DEFAULT_REC_PREFIX "cam0"
 
-static void print_usage(const RKADK_CHAR *name) {
-  printf("usage example:\n");
-  printf("\t%s [-a /etc/iqfiles] [-I 0]\n", name);
-  printf("\t-a: enable aiq with dirpath provided, eg:-a "
-         "/oem/etc/iqfiles/, Default /etc/iqfiles,"
-         "without this option aiq should run in other application\n");
-  printf("\t-I: Camera id, Default:0\n");
-  printf("\t-p: param ini directory path, Default:/data/rkadk\n");
-  printf("\t-k: key frame fragment, Default: disable\n");
-  printf("\t-m: multiple sensors, Default:0, options: 1(all isp sensors), 2(isp+ahd sensors)\n");
-  printf("\t-c: loop switch normal record and aov lapse record count, Default: 0\n");
-  printf("\t-t: loop switch once duration(second), Default: 30s\n");
-  printf("\t-d: enable debug, Default: disable\n");
-  printf("\t-S: aov suspend time, Default: 1000ms\n");
-  printf("\t-o: osd file, ARGB8888 fmt, Default:NULL\n");
-  printf("\t-x: osd x-coordinate, Default: 0\n");
-  printf("\t-y: osd y-coordinate, Default: 0\n");
-  printf("\t-W: osd width, Default: 777\n");
-  printf("\t-H: osd height, Default: 46\n");
-}
+static volatile bool g_running = true;
 
-static RKADK_S32
-GetRecordFileName(RKADK_MW_PTR pRecorder, RKADK_U32 u32FileCnt,
-                  RKADK_CHAR (*paszFilename)[RKADK_MAX_FILE_PATH_LEN]) {
-  static RKADK_U32 u32FileIdx = 0;
-
-  RKADK_LOGP("u32FileCnt:%d, pRecorder:%p", u32FileCnt, pRecorder);
-
-  if (u32FileIdx >= 50)
-    u32FileIdx = 0;
-
-  for (RKADK_U32 i = 0; i < u32FileCnt; i++) {
-    sprintf(paszFilename[i], "/mnt/sdcard/RecordTest_%u.mp4", u32FileIdx);
-    u32FileIdx++;
-  }
-
-  return 0;
-}
-
-static RKADK_VOID
-RecordEventCallback(RKADK_MW_PTR pRecorder,
-                    const RKADK_MUXER_EVENT_INFO_S *pstEventInfo) {
-  switch (pstEventInfo->enEvent) {
-  case RKADK_MUXER_EVENT_STREAM_START:
-    printf("+++++ RKADK_MUXER_EVENT_STREAM_START +++++\n");
-    break;
-  case RKADK_MUXER_EVENT_STREAM_STOP:
-    printf("+++++ RKADK_MUXER_EVENT_STREAM_STOP +++++\n");
-    break;
-  case RKADK_MUXER_EVENT_FILE_BEGIN:
-    printf("+++++ RKADK_MUXER_EVENT_FILE_BEGIN +++++\n");
-    printf("\tstFileInfo: %s\n",
-           pstEventInfo->unEventInfo.stFileInfo.asFileName);
-    printf("\tu32Duration: %d\n",
-           pstEventInfo->unEventInfo.stFileInfo.u32Duration);
-    break;
-  case RKADK_MUXER_EVENT_FILE_END:
-    printf("+++++ RKADK_MUXER_EVENT_FILE_END +++++\n");
-    printf("\tstFileInfo: %s\n",
-           pstEventInfo->unEventInfo.stFileInfo.asFileName);
-    printf("\tu32Duration: %d\n",
-           pstEventInfo->unEventInfo.stFileInfo.u32Duration);
-    break;
-  case RKADK_MUXER_EVENT_MANUAL_SPLIT_END:
-    printf("+++++ RKADK_MUXER_EVENT_MANUAL_SPLIT_END +++++\n");
-    printf("\tstFileInfo: %s\n",
-           pstEventInfo->unEventInfo.stFileInfo.asFileName);
-    printf("\tu32Duration: %d\n",
-           pstEventInfo->unEventInfo.stFileInfo.u32Duration);
-    break;
-  case RKADK_MUXER_EVENT_ERR_CREATE_FILE_FAIL:
-    printf("+++++ RKADK_MUXER_EVENT_ERR_CREATE_FILE_FAIL[%d, %s] +++++\n",
-            pstEventInfo->unEventInfo.stErrorInfo.s32ErrorCode,
-            strerror(pstEventInfo->unEventInfo.stErrorInfo.s32ErrorCode));
-    break;
-  case RKADK_MUXER_EVENT_ERR_WRITE_FILE_FAIL:
-    printf("+++++ RKADK_MUXER_EVENT_ERR_WRITE_FILE_FAIL[%d, %s] +++++\n",
-            pstEventInfo->unEventInfo.stErrorInfo.s32ErrorCode,
-            strerror(pstEventInfo->unEventInfo.stErrorInfo.s32ErrorCode));
-    break;
-  case RKADK_MUXER_EVENT_FILE_WRITING_SLOW:
-    printf("+++++ RKADK_MUXER_EVENT_FILE_WRITING_SLOW +++++\n");
-    break;
-  case RKADK_MUXER_EVENT_ERR_CARD_NONEXIST:
-    printf("+++++ RKADK_MUXER_EVENT_ERR_CARD_NONEXIST +++++\n");
-    break;
-  default:
-    printf("+++++ Unknown event(%d) +++++\n", pstEventInfo->enEvent);
-    break;
-  }
-}
-
-#ifdef RKAIQ
-static int IspProcess(RKADK_S32 u32CamId) {
-  int ret;
-  bool mirror = false, flip = false;
-
-  // set mirror flip
-  ret = RKADK_PARAM_GetCamParam(u32CamId, RKADK_PARAM_TYPE_MIRROR, &mirror);
-  if (ret)
-    RKADK_LOGE("RKADK_PARAM_GetCamParam mirror failed");
-
-  ret = RKADK_PARAM_GetCamParam(u32CamId, RKADK_PARAM_TYPE_FLIP, &flip);
-  if (ret)
-    RKADK_LOGE("RKADK_PARAM_GetCamParam flip failed");
-
-  if (mirror || flip) {
-    ret = SAMPLE_ISP_SET_MirrorFlip(u32CamId, mirror, flip);
-    if (ret)
-      RKADK_LOGE("SAMPLE_ISP_SET_MirrorFlip failed");
-  }
-
-#ifdef RKADK_DUMP_ISP_RESULT
-  // mirror flip
-  ret = SAMPLE_ISP_GET_MirrorFlip(u32CamId, &mirror, &flip);
-  if (ret)
-    RKADK_LOGE("SAMPLE_ISP_GET_MirrorFlip failed");
-  else
-    RKADK_LOGP("GET mirror = %d, flip = %d", mirror, flip);
-#endif
-
-  return 0;
-}
-#endif
-
-static void sigterm_handler(int sig) {
-  fprintf(stderr, "signal %d\n", sig);
-  is_quit = true;
-}
-
-static bool DeviceDriverIsBound(const char *device, const char *driver) {
-  char path[256] = {'\0'};
-  snprintf(path, 256, "%s/%s", driver, device);
-  return (access(path, F_OK) == 0);
-}
-
-static int DeviceAttachDriver(const char *device, const char *driver) {
-  char path[256] = {'\0'};
-  int fd = -1;
-  int ret = 0;
-
-  snprintf(path, sizeof(path), "%s/bind", driver);
-  fd = open(path, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
-  if (fd < 0) {
-    RKADK_LOGE("can't open %s, errno = %s", driver, strerror(errno));
-    return RKADK_FAILURE;
-  }
-  RKADK_LOGP("start bind %s to %s", device, driver);
-
-  ret = write(fd, device, strlen(device));
-  if (ret < 0) {
-    RKADK_LOGE("bind %s to %s failed, errno = %s", device, driver, strerror(errno));
-    close(fd);
-    return RKADK_FAILURE;
-  }
-
-  close(fd);
-  return RKADK_SUCCESS;
-}
-
-static int DeviceDetachDriver(const char *device, const char *driver) {
-  char path[256] = {'\0'};
-  int fd = -1;
-  int ret = 0;
-
-  snprintf(path, sizeof(path), "%s/unbind", driver);
-  fd = open(path, O_WRONLY | O_NONBLOCK | O_CLOEXEC);
-  if (fd < 0) {
-    RKADK_LOGP("can't open %s, errno = %s", path, strerror(errno));
-    return RKADK_FAILURE;
-  }
-
-  RKADK_LOGP("start unbind %s from %s", device, driver);
-  ret = write(fd, device, strlen(device));
-  if (ret < 0) {
-    RKADK_LOGE("unbind %s from %s failed, errno = %s", device, driver, strerror(errno));
-    close(fd);
-    return RKADK_FAILURE;
-  }
-
-  close(fd);
-  return RKADK_SUCCESS;
-}
-
-static bool DetectSdcardIsEnable() {
-  int value = 0;
-#ifdef RV1106_1103
-  int addr = 0xffaa0050;
-#else
-  int addr = 0x21D60050;
-#endif
-
-  if (RKADK_AOV_ReadReg(addr, (unsigned char *)&value, sizeof(value)) != RK_SUCCESS)
-    return false;
-  if (value == 0)
-    return true;
-  else
-    return false;
-}
-
-static int BindSdcard() {
-  int ret = 0;
-  int fd = -1;
-  char buf[MAX_NL_BUF_SIZE] = {'\0'};
-  fd_set read_set;
-  struct timeval timeout;
-  struct sockaddr_nl addr;
-
-  if (DeviceDriverIsBound(SDCARD_DEVICE, SDCARD_DRIVER)) {
-    RKADK_LOGE("sdcard device already bind");
-    return RKADK_SUCCESS;
-  }
-
-  memset(&addr, 0, sizeof(addr));
-  addr.nl_family = AF_NETLINK;
-  addr.nl_groups = NETLINK_KOBJECT_UEVENT;
-  addr.nl_pid = 0;
-
-  fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_KOBJECT_UEVENT);
-  if (fd < 0) {
-    RKADK_LOGE("Failed to open sdcard netlink, errno = %s", strerror(errno));
-    return RKADK_FAILURE;
-  } else if (bind(fd, (struct sockaddr *)(&addr), sizeof(addr)) != 0) {
-    RKADK_LOGE("bind sdcard netlink addr failed, errno = %s", strerror(errno));
-    goto __FAILED;
-  }
-
-  FD_ZERO(&read_set);
-  FD_SET(fd, &read_set);
-  timeout.tv_sec = 0;
-  timeout.tv_usec = MAX_SELECT_TIMEOUT;
-
-  // bind sdcard
-  if (DeviceAttachDriver(SDCARD_DEVICE, SDCARD_DRIVER) != RKADK_SUCCESS)
-    goto __FAILED;
-
-  // wait for bind success
-__RETRY:
-  ret = select(fd + 1, &read_set, NULL, NULL, &timeout);
-  if (ret > 0) {
-    memset(&buf, 0, sizeof(buf));
-    read(fd, buf, sizeof(buf));
-    buf[MAX_NL_BUF_SIZE - 1] = '\0';
-#ifndef RV1126_1109
-    if (strncmp(buf, SDCARD_DRIVER_PREPARED, strlen(SDCARD_DRIVER_PREPARED)) == 0) {
-      // printf("[%s()] sdcard driver is prepared\n", __func__);
-      // read sdmmc-cd register to speed up bind procedure.
-      if (DetectSdcardIsEnable()) {
-        RKADK_LOGP("sdcard is enable\n");
-      } else {
-        RKADK_LOGP("sdcard is disable\n");
-        goto __FAILED;
-      }
+static void sigterm_handler(int sig)
+{
+    if (sig == SIGINT || sig == SIGTERM) {
+        printf("Signal %d caught, exiting...\n", sig);
+        g_running = false;
     }
-#endif
-    // printf("[%s()] bind msg: %s\n", __func__, buf);
-    if (strncmp(buf, SDCARD_BIND_DONE, strlen(SDCARD_BIND_DONE)) == 0) {
-      RKADK_LOGP("Bind success: %s", buf);
-      goto __SUCCESS;
-    }
-    goto __RETRY; // drop all message
-  } else {
-    RKADK_LOGE("select error = %s", strerror(errno));
-    goto __FAILED;
-  }
-
-__SUCCESS:
-  close(fd);
-  return RKADK_SUCCESS;
-
-__FAILED:
-  close(fd);
-  return RKADK_FAILURE;
 }
 
-static int UnbindSdcard() {
-  int ret = 0;
-  int fd = -1;
-  char buf[MAX_NL_BUF_SIZE] = {'\0'};
-  fd_set read_set;
-  struct timeval timeout;
-  struct sockaddr_nl addr;
+typedef struct {
+    const char *iq_file_dir;
+    int cam_num;
+    int cam0_id;
+    int fps;
+    int width;
+    int height;
+    int gop;
+    int bitrate;
+    const char *bind_mode;
+    const char *rec_dir;
+    const char *rec_prefix;
+    int rec_split_sec;
+    int max_folder_size_mb;
+    int loop_count;
+    int loop_duration_sec;
+    int suspend_time_ms;
+    bool enable_aov;
+    bool use_h265;
+} AppArgs_t;
 
-  if (!DeviceDriverIsBound(SDCARD_DEVICE, SDCARD_DRIVER)) {
-    RKADK_LOGE("sdcard device already unbind!");
-    return RKADK_SUCCESS;
-  }
+enum {
+    OPT_WIDTH = 1000,
+    OPT_HEIGHT,
+    OPT_BITRATE,
+    OPT_GOP,
+    OPT_BIND_MODE,
+    OPT_REC_DIR,
+    OPT_REC_PREFIX,
+    OPT_REC_SPLIT,
+    OPT_MAX_FOLDER_SIZE,
+    OPT_ENABLE_AOV,
+    OPT_LOOP_COUNT,
+    OPT_LOOP_DURATION,
+    OPT_CODEC,
+};
 
-  memset(&addr, 0, sizeof(addr));
-  addr.nl_family = AF_NETLINK;
-  addr.nl_groups = NETLINK_KOBJECT_UEVENT;
-  addr.nl_pid = 0;
+static const struct option g_long_options[] = {
+    {"aiq", required_argument, NULL, 'a'},
+    {"cam0_id", required_argument, NULL, 'I'},
+    {"camera_num", required_argument, NULL, 'n'},
+    {"fps", required_argument, NULL, 'f'},
+    {"width", required_argument, NULL, OPT_WIDTH},
+    {"height", required_argument, NULL, OPT_HEIGHT},
+    {"bitrate", required_argument, NULL, OPT_BITRATE},
+    {"gop", required_argument, NULL, OPT_GOP},
+    {"bind_mode", required_argument, NULL, OPT_BIND_MODE},
+    {"rec_dir", required_argument, NULL, OPT_REC_DIR},
+    {"rec_prefix", required_argument, NULL, OPT_REC_PREFIX},
+    {"rec_split", required_argument, NULL, OPT_REC_SPLIT},
+    {"max_folder_size", required_argument, NULL, OPT_MAX_FOLDER_SIZE},
+    {"enable_aov", required_argument, NULL, OPT_ENABLE_AOV},
+    {"loop_count", required_argument, NULL, OPT_LOOP_COUNT},
+    {"loop_duration", required_argument, NULL, OPT_LOOP_DURATION},
+    {"codec", required_argument, NULL, OPT_CODEC},
+    {"suspend", required_argument, NULL, 'S'},
+    {"help", no_argument, NULL, 'h'},
+    {0, 0, 0, 0},
+};
 
-  fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_KOBJECT_UEVENT);
-  if (fd < 0) {
-    RKADK_LOGE("Failed to open sdcard netlink, errno = %s", strerror(errno));
-    return RKADK_FAILURE;
-  } else if (bind(fd, (struct sockaddr *)(&addr), sizeof(addr)) != 0) {
-    RKADK_LOGE("bind sdcard netlink addr failed, errno = %s", strerror(errno));
-    goto __FAILED;
-  }
-
-  memset(&buf, 0, sizeof(buf));
-  FD_ZERO(&read_set);
-  FD_SET(fd, &read_set);
-  timeout.tv_sec = 0;
-  timeout.tv_usec = MAX_SELECT_TIMEOUT;
-
-  // unbind sdcard
-  if (DeviceDetachDriver(SDCARD_DEVICE, SDCARD_DRIVER) != RKADK_SUCCESS)
-    goto __FAILED;
-
-  // wait for unbind success
-__RETRY:
-  ret = select(fd + 1, &read_set, NULL, NULL, &timeout);
-  if (ret > 0) {
-    memset(&buf, 0, sizeof(buf));
-    read(fd, buf, sizeof(buf));
-    buf[MAX_NL_BUF_SIZE - 1] = '\0';
-    // printf("[%s()] unbind msg: %s\n", __func__, buf);
-    if (strcmp(buf, SDCARD_UNBIND_DONE) == 0) {
-      RKADK_LOGP("Unbind success: %s", buf);
-      goto __SUCCESS;
-    }
-    goto __RETRY; // drop all message
-  } else {
-    RKADK_LOGE("select error %s", strerror(errno));
-    goto __FAILED;
-  }
-
-__SUCCESS:
-  close(fd);
-  return RKADK_SUCCESS;
-
-__FAILED:
-  close(fd);
-  return RKADK_FAILURE;
+static void print_usage(const char *name)
+{
+    printf("usage example:\n");
+    printf("\t%s -I 0 -a /etc/iqfiles --width 1920 --height 1080 --codec h265\n", name);
+    printf("\t-a: AIQ iqfiles 路径, 默认 /etc/iqfiles\n");
+    printf("\t-I: cam0 sensor id, 默认 0\n");
+    printf("\t-n: camera 数量 (1 或 2), 默认 1\n");
+    printf("\t-f: 帧率 fps, 默认 25\n");
+    printf("\t--width: 主码流宽度, 默认 1920\n");
+    printf("\t--height: 主码流高度, 默认 1080\n");
+    printf("\t--bitrate: 编码码率 kbps, 默认 4096\n");
+    printf("\t--gop: GOP (关键帧间隔), 默认等于 fps\n");
+    printf("\t--bind_mode: 绑定模式 vpss 或 direct, 默认 vpss\n");
+    printf("\t--rec_dir: 录像存储路径, 默认 /mnt/sdcard/video\n");
+    printf("\t--rec_prefix: 录像文件名前缀, 默认 cam0\n");
+    printf("\t--rec_split: 单文件切片时长秒, 默认 60\n");
+    printf("\t--max_folder_size: 录像文件夹最大容量MB, 0不限制, 默认 0\n");
+    printf("\t--enable_aov: 是否启用 AOV 低功耗休眠 (0/1), 默认 1\n");
+    printf("\t-S: AOV 休眠时间 ms, 默认 1000\n");
+    printf("\t--codec: h264 或 h265, 默认 h265\n");
+    printf("\t--loop_count: 循环切换次数, 默认 -1 (不切换)\n");
+    printf("\t--loop_duration: 循环切换间隔秒, 默认 30\n");
 }
 
-static int CheckSDcardMount(void) {
-  int fd = -1, ret = -1, pos = 0;
-  char line[MAX_LINE_SIZE];
-  ssize_t bytesRead;
-
-  fd = open("/proc/mounts", O_RDONLY);
-  if (fd == -1) {
-    RKADK_LOGE("Error opening /proc/mounts");
-    return ret;
-  }
-
-  while ((bytesRead = read(fd, &line[pos], 1)) > 0) {
-    if (line[pos] == '\n') {
-      line[pos] = '\0'; // Null-terminate the string
-      if (strstr(line, "/mnt/sdcard")) {
-        RKADK_LOGP("Found '/mnt/sdcard' in line: %s", line);
-        ret = 0;
-        break; // No need to continue searching
-      }
-      pos = 0; // Reset position for next line
-    } else {
-      pos++;
-      if (pos >= MAX_LINE_SIZE - 1) {
-        // Line exceeds buffer size, discard it
-        pos = 0;
-      }
-    }
-  }
-
-  close(fd);
-  return ret;
+static void set_default_args(AppArgs_t *args)
+{
+    memset(args, 0, sizeof(*args));
+    args->iq_file_dir = IQ_FILE_PATH;
+    args->cam_num = 1;
+    args->cam0_id = 0;
+    args->fps = 25;
+    args->width = 1920;
+    args->height = 1080;
+    args->gop = -1;
+    args->bitrate = 4096;
+    args->bind_mode = "vpss";
+    args->rec_dir = DEFAULT_REC_DIR;
+    args->rec_prefix = DEFAULT_REC_PREFIX;
+    args->rec_split_sec = 60;
+    args->max_folder_size_mb = 0;
+    args->loop_count = -1;
+    args->loop_duration_sec = 30;
+    args->suspend_time_ms = 1000;
+    args->enable_aov = true;
+    args->use_h265 = false;
 }
 
-static int MountSdcard() {
-  RKADK_LOGP("Enter mount");
+static int parse_args(int argc, char *argv[], AppArgs_t *args)
+{
+    int c;
 
-  int ret = 0;
+    while ((c = getopt_long(argc, argv, "a:I:n:f:S:h", g_long_options, NULL)) != -1) {
+        switch (c) {
+        case 'a':
+            args->iq_file_dir = optarg;
+            break;
+        case 'I':
+            args->cam0_id = atoi(optarg);
+            break;
+        case 'n':
+            args->cam_num = atoi(optarg);
+            break;
+        case 'f':
+            args->fps = atoi(optarg);
+            break;
+        case 'S':
+            args->suspend_time_ms = atoi(optarg);
+            break;
+        case OPT_WIDTH:
+            args->width = atoi(optarg);
+            break;
+        case OPT_HEIGHT:
+            args->height = atoi(optarg);
+            break;
+        case OPT_BITRATE:
+            args->bitrate = atoi(optarg);
+            break;
+        case OPT_GOP:
+            args->gop = atoi(optarg);
+            break;
+        case OPT_BIND_MODE:
+            args->bind_mode = optarg;
+            break;
+        case OPT_REC_DIR:
+            args->rec_dir = optarg;
+            break;
+        case OPT_REC_PREFIX:
+            args->rec_prefix = optarg;
+            break;
+        case OPT_REC_SPLIT:
+            args->rec_split_sec = atoi(optarg);
+            break;
+        case OPT_MAX_FOLDER_SIZE:
+            args->max_folder_size_mb = atoi(optarg);
+            break;
+        case OPT_ENABLE_AOV:
+            args->enable_aov = atoi(optarg) ? true : false;
+            break;
+        case OPT_LOOP_COUNT:
+            args->loop_count = atoi(optarg);
+            break;
+        case OPT_LOOP_DURATION:
+            args->loop_duration_sec = atoi(optarg);
+            break;
+        case OPT_CODEC:
+            if (strcmp(optarg, "h264") == 0) {
+                args->use_h265 = false;
+            } else if (strcmp(optarg, "h265") == 0) {
+                args->use_h265 = true;
+            } else {
+                return -1;
+            }
+            break;
+        case 'h':
+        default:
+            print_usage(argv[0]);
+            return -1;
+        }
+    }
 
-  BindSdcard();
+    if (args->cam_num < 1 || args->cam_num > 2) {
+        printf("[AOV] camera_num 需要为 1 或 2\n");
+        return -1;
+    }
+    if (args->fps <= 0)
+        return -1;
+    if (args->width <= 0 || args->height <= 0)
+        return -1;
+    if (args->rec_split_sec <= 0)
+        return -1;
 
-  if (CheckSDcardMount() == 0) {
-    RKADK_LOGP("sdcard already mount");
     return 0;
-  }
-
-  // mount sd
-  if (access(MOUNT_DEV_1, F_OK) == 0) {
-    ret = mount(MOUNT_DEV_1, "/mnt/sdcard", "vfat", 0, NULL);
-    if (ret != 0)
-      RKADK_LOGE("mount failed, errno = %s", strerror(errno));
-    else
-      RKADK_LOGP("mount success");
-  } else if (access(MOUNT_DEV_2, F_OK) == 0) {
-    ret = mount(MOUNT_DEV_2, "/mnt/sdcard", "vfat", 0, NULL);
-    if (ret != 0)
-      RKADK_LOGE("mount failed, errno = %s", strerror(errno));
-    else
-      RKADK_LOGP("mount success");
-  } else {
-    RKADK_LOGE("bad mount path!");
-  }
-
-  if (0 != CheckSDcardMount()) {
-    RKADK_LOGE("Not found mount sdcard on /mnt/sdcard");
-    UnbindSdcard();
-    ret = -1;
-  }
-
-  RKADK_LOGP("Exit mount");
-  return ret;
 }
 
-static int UmountSdcard() {
-  int ret = 0;
+static void fill_camera_cfg(CamPipeCameraCfg_t *camera_cfg,
+                            int cam_id,
+                            const char *iq_dir,
+                            int fps,
+                            int width,
+                            int height)
+{
+    memset(camera_cfg, 0, sizeof(*camera_cfg));
+    camera_cfg->isp_cfg.cam_id = cam_id;
+    camera_cfg->isp_cfg.iq_file_dir = iq_dir;
+    camera_cfg->isp_cfg.hdr_mode = CAM_ADAPTER_HDR_NORMAL;
+    camera_cfg->isp_cfg.fps = fps;
+    camera_cfg->isp_cfg.is_multi_cam = false;
 
-  RKADK_LOGP("Enter umount");
-
-  if (CheckSDcardMount() != 0) {
-    RKADK_LOGP("sdcard already umount");
-    return 0;
-  }
-
-  ret = umount2(MOUNT_PATH, MNT_DETACH);
-  if (ret == 0)
-    RKADK_LOGE("unmount success");
-  else
-    RKADK_LOGE("unmount failed because %s", strerror(errno));
-
-  ret = UnbindSdcard();
-  if (ret == 0)
-    RKADK_LOGE("UnbindSdcard success");
-  else
-    RKADK_LOGE("UnbindSdcard failed because %s", strerror(errno));
-
-  RKADK_LOGP("Exit umount");
-  return ret;
+    camera_cfg->vi_cfg.pipe_id = cam_id;
+    camera_cfg->vi_cfg.chn_id = 1;
+    camera_cfg->vi_cfg.width = width;
+    camera_cfg->vi_cfg.height = height;
+    camera_cfg->vi_cfg.buf_cnt = 2;
+    camera_cfg->vi_cfg.pix_fmt = RK_FMT_YUV420SP;
+    camera_cfg->vi_cfg.buf_wrap_enable = false;
+    camera_cfg->vi_cfg.buf_line = 0;
 }
 
-static void AovNotifyCallback(RKADK_AOV_EVENT_E enEvent, void *msg) {
-  switch(enEvent) {
-  case RKADK_AOV_ENTER_SLEEP:
-    RKADK_LOGP("+++++ RKADK_AOV_ENTER_SLEEP +++++");
+static void fill_runner_cfg(const AppArgs_t *args, AovRunnerCfg_t *cfg)
+{
+    int bind_idx = 0;
+    int output_idx = 0;
+    int codec_type = args->use_h265 ? CAM_ADAPTER_CODEC_H265 : CAM_ADAPTER_CODEC_H264;
+    int gop = (args->gop > 0) ? args->gop : args->fps;
 
-    RKADK_AOV_WakeupLock();
-    RKADK_LOGP("fs sdcard lock");
-    UmountSdcard();
-    RKADK_AOV_EnterSleep();
-    RKADK_AOV_WakeupUnlock();
-    RKADK_LOGP("fs sdcard unlock");
-    break;
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->fps = args->fps;
+    cfg->enable_aov = args->enable_aov;
+    cfg->use_h265 = args->use_h265;
+    cfg->suspend_time_ms = args->suspend_time_ms;
+    cfg->loop_count = args->loop_count;
+    cfg->loop_duration_sec = args->loop_duration_sec;
 
-  default:
-    RKADK_LOGP("Unknown event: %d", enEvent);
-    break;
-  }
+    cfg->pipe_cfg.camera_count = args->cam_num;
+    cfg->pipe_cfg.avs_count = 0;
+
+    fill_camera_cfg(&cfg->pipe_cfg.cameras[0], args->cam0_id, args->iq_file_dir,
+                    args->fps, args->width, args->height);
+
+    if (args->cam_num > 1) {
+        fill_camera_cfg(&cfg->pipe_cfg.cameras[1], 1, args->iq_file_dir,
+                        args->fps, args->width, args->height);
+    }
+
+    for (int i = 0; i < args->cam_num; ++i) {
+        int cam_id = (i == 0) ? args->cam0_id : 1;
+
+        if (strcmp(args->bind_mode, "direct") == 0) {
+            cfg->pipe_cfg.cameras[i].enable_vpss = false;
+
+            cfg->pipe_cfg.binds[bind_idx].camera_index = i;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.src.mod_type = CAM_MODULE_VI;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.src.dev_id = cam_id;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.src.chn_id = 1;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.dst.mod_type = CAM_MODULE_VENC;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.dst.dev_id = 0;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.dst.chn_id = i;
+            bind_idx++;
+        } else {
+            cfg->pipe_cfg.cameras[i].enable_vpss = true;
+            cfg->pipe_cfg.cameras[i].vpss_cfg.grp_id = cam_id;
+            cfg->pipe_cfg.cameras[i].vpss_cfg.channel_count = 1;
+            cfg->pipe_cfg.cameras[i].vpss_cfg.channels[0].chn_id = 0;
+            cfg->pipe_cfg.cameras[i].vpss_cfg.channels[0].width = args->width;
+            cfg->pipe_cfg.cameras[i].vpss_cfg.channels[0].height = args->height;
+            cfg->pipe_cfg.cameras[i].vpss_cfg.channels[0].pix_fmt = RK_FMT_YUV420SP;
+            cfg->pipe_cfg.cameras[i].vpss_cfg.channels[0].chn_mode = CAM_VPSS_CHN_MODE_AUTO;
+            cfg->pipe_cfg.cameras[i].vpss_cfg.channels[0].enabled = true;
+
+            cfg->pipe_cfg.binds[bind_idx].camera_index = i;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.src.mod_type = CAM_MODULE_VI;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.src.dev_id = cam_id;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.src.chn_id = 1;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.dst.mod_type = CAM_MODULE_VPSS;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.dst.dev_id = cam_id;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.dst.chn_id = 0;
+            bind_idx++;
+
+            cfg->pipe_cfg.binds[bind_idx].camera_index = i;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.src.mod_type = CAM_MODULE_VPSS;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.src.dev_id = cam_id;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.src.chn_id = 0;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.dst.mod_type = CAM_MODULE_VENC;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.dst.dev_id = 0;
+            cfg->pipe_cfg.binds[bind_idx].bind_cfg.dst.chn_id = i;
+            bind_idx++;
+        }
+
+        cfg->pipe_cfg.outputs[output_idx].route_id = i;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.chn_id = i;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.width = args->width;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.height = args->height;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.fps = args->fps;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.gop = gop;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.bitrate = args->bitrate;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.codec_type = codec_type;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.rc_mode = CAM_ADAPTER_RC_CBR;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.buf_wrap_enable = false;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.buf_line = 0;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.svc_enable = false;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.motion_deblur_enable = false;
+        cfg->pipe_cfg.outputs[output_idx].venc_cfg.ref_buf_share = true;
+        output_idx++;
+    }
+
+    cfg->pipe_cfg.output_count = output_idx;
+    cfg->pipe_cfg.bind_count = bind_idx;
+
+    strncpy(cfg->rec_dir, args->rec_dir, sizeof(cfg->rec_dir) - 1);
+    strncpy(cfg->rec_prefix, args->rec_prefix, sizeof(cfg->rec_prefix) - 1);
 }
 
-int main(int argc, char *argv[]) {
-  int c, ret;
-  RKADK_RECORD_ATTR_S stRecAttr;
-  RKADK_MW_PTR pRecorder = NULL, pRecorder1 = NULL;
-  RK_BOOL bMultiSensor = RK_FALSE;
-  const char *iniPath = NULL;
-  RKADK_REC_TYPE_E enRecType;
-  RKADK_PARAM_RES_E type;
-  RKADK_PARAM_FPS_S stFps;
-  RKADK_PARAM_CODEC_CFG_S stCodecType;
-  char path[RKADK_PATH_LEN];
-  char sensorPath[RKADK_MAX_SENSOR_CNT][RKADK_PATH_LEN];
-  RKADK_S32 s32CamId = 0;
-  FILE_CACHE_ARG stFileCacheAttr;
-  int loopCount = -1, loopDuration = 30;
-  bool bDebug = false;
+static void print_config(const AppArgs_t *args, const AovRunnerCfg_t *cfg)
+{
+    printf("AOV config: cam=%d, %dx%d@%d, codec=%s, bind=%s\n",
+           args->cam_num, args->width, args->height, args->fps,
+           args->use_h265 ? "h265" : "h264", args->bind_mode);
+    printf("  rec: %s/%s_*.%s (raw stream)\n",
+           args->rec_dir, args->rec_prefix,
+           args->use_h265 ? "h265" : "h264");
+    printf("  AOV: %s, suspend=%dms, loop=%d/%ds\n",
+           args->enable_aov ? "enabled" : "disabled",
+           args->suspend_time_ms, args->loop_count, args->loop_duration_sec);
+}
 
-  //osd
-  char *osdfile = NULL;
-  RKADK_U32 u32OsdX = 0, u32OsdY = 0;
-  RKADK_U32 u32OsdWidth = 777, u32OsdHeight = 46;
-  RKADK_OSD_ATTR_S OsdAttr;
-  RKADK_OSD_STREAM_ATTR_S OsdStreamAttr;
-  RKADK_U32 u32OsdId = 0;
+int main(int argc, char *argv[])
+{
+    AppArgs_t args;
+    AovRunnerCfg_t runner_cfg;
 
-#ifdef ENABLE_AOV
-  RKADK_S32 s32SuspendTime = 1000;
-  RKADK_AOV_ARG_S stAovArg;
-#endif
-
-#ifdef RKAIQ
-  int inCmd = 0;
-  RK_BOOL bMultiCam = RK_FALSE;
-  const char *tmp_optarg = optarg;
-  SAMPLE_ISP_PARAM stIspParam;
-
-  memset(&stIspParam, 0, sizeof(SAMPLE_ISP_PARAM));
-  stIspParam.iqFileDir = IQ_FILE_PATH;
-#endif
-
-  memset(&stRecAttr, 0, sizeof(RKADK_RECORD_ATTR_S));
-
-  while ((c = getopt(argc, argv, optstr)) != -1) {
-    switch (c) {
-#ifdef RKAIQ
-    case 'a':
-      if (!optarg && NULL != argv[optind] && '-' != argv[optind][0]) {
-        tmp_optarg = argv[optind++];
-      }
-
-      if (tmp_optarg)
-        stIspParam.iqFileDir = (char *)tmp_optarg;
-      break;
-    case 'm':
-      inCmd = atoi(optarg);
-      if (inCmd == 1) {
-        bMultiCam = RKADK_TRUE;
-        bMultiSensor = RKADK_TRUE;
-      } else if (inCmd == 2)
-        bMultiSensor = RKADK_TRUE;
-      break;
-#endif
-    case 'I':
-      s32CamId = atoi(optarg);
-      break;
-    case 'p':
-      iniPath = optarg;
-      RKADK_LOGP("iniPath: %s", iniPath);
-      break;
-    case 'k':
-      stRecAttr.u32FragKeyFrame = 1;
-      break;
-#ifdef ENABLE_AOV
-    case 'S':
-      s32SuspendTime = atoi(optarg);
-      break;
-#endif
-    case 'c':
-      loopCount = atoi(optarg);
-      break;
-    case 't':
-      loopDuration = atoi(optarg);
-      break;
-    case 'd':
-      bDebug = true;
-      break;
-    case 'o':
-      osdfile = optarg;
-      break;
-    case 'x':
-      u32OsdX = atoi(optarg);
-      break;
-    case 'y':
-      u32OsdY = atoi(optarg);
-      break;
-    case 'W':
-      u32OsdWidth = atoi(optarg);
-      break;
-    case 'H':
-      u32OsdHeight = atoi(optarg);
-      break;
-    case 'h':
-    default:
-      print_usage(argv[0]);
-      optind = 0;
-      return -1;
-    }
-  }
-  optind = 0;
-
-  RKADK_LOGP("loopCount: %d, loopDuration: %d", loopCount, loopDuration);
-
-  MountSdcard();
-
-#ifdef ENABLE_AOV
-  memset(&stAovArg, 0, sizeof(RKADK_AOV_ARG_S));
-  stAovArg.pfnNotifyCallback = AovNotifyCallback;
-  RKADK_AOV_Init(&stAovArg);
-
-  RKADK_LOGP("s32SuspendTime: %d", s32SuspendTime);
-  RKADK_AOV_SetSuspendTime(s32SuspendTime);
-#endif
-
-  if (bMultiSensor)
-    s32CamId = 0;
-
-  RKADK_MPI_SYS_Init();
-
-  if (iniPath) {
-    memset(path, 0, RKADK_PATH_LEN);
-    memset(sensorPath, 0, RKADK_MAX_SENSOR_CNT * RKADK_PATH_LEN);
-    sprintf(path, "%s/rkadk_setting.ini", iniPath);
-    for (int i = 0; i < RKADK_MAX_SENSOR_CNT; i++)
-      sprintf(sensorPath[i], "%s/rkadk_setting_sensor_%d.ini", iniPath, i);
-
-    /*
-    lg:
-      char *sPath[] = {"/data/rkadk/rkadk_setting_sensor_0.ini",
-      "/data/rkadk/rkadk_setting_sensor_1.ini", NULL};
-    */
-    char *sPath[] = {sensorPath[0], sensorPath[1], NULL};
-
-    RKADK_PARAM_Init(path, sPath);
-  } else {
-    RKADK_PARAM_Init(NULL, NULL);
-  }
-
-record:
-#ifdef RKAIQ
-  stFps.enStreamType = RKADK_STREAM_TYPE_SENSOR;
-  ret = RKADK_PARAM_GetCamParam(s32CamId, RKADK_PARAM_TYPE_FPS, &stFps);
-  if (ret) {
-    RKADK_LOGE("RKADK_PARAM_GetCamParam u32CamId[%d] fps failed", s32CamId);
-    return -1;
-  }
-
-  stIspParam.WDRMode = RK_AIQ_WORKING_MODE_NORMAL;
-  stIspParam.bMultiCam = bMultiCam;
-  stIspParam.fps = stFps.u32Framerate;
-  SAMPLE_ISP_Start(s32CamId, stIspParam);
-  //IspProcess(s32CamId);
-
-  if (bMultiCam) {
-    ret = RKADK_PARAM_GetCamParam(1, RKADK_PARAM_TYPE_FPS, &stFps);
-    if (ret) {
-      RKADK_LOGE("RKADK_PARAM_GetCamParam u32CamId[1] fps failed");
-      SAMPLE_ISP_Stop(s32CamId);
-      return -1;
+    set_default_args(&args);
+    if (parse_args(argc, argv, &args) != 0) {
+        print_usage(argv[0]);
+        return -1;
     }
 
-    SAMPLE_ISP_Start(1, stIspParam);
-    //IspProcess(1);
-  }
-#endif
+    fill_runner_cfg(&args, &runner_cfg);
+    print_config(&args, &runner_cfg);
 
-  //enable file cache
-  ret = putenv("file_cache_env=1");
-  if (ret)
-    RKADK_LOGE("putenv file_cache_env failed");
+    signal(SIGINT, sigterm_handler);
+    signal(SIGTERM, sigterm_handler);
 
-  if (bDebug) {
-    ret = putenv("file_cache_log=6");
-      RKADK_LOGE("putenv file_cache_log failed");
-  }
-
-  memset(&stFileCacheAttr, 0, sizeof(FILE_CACHE_ARG));
-  stFileCacheAttr.sdcard_path = "/dev/mmcblk1p1";
-  stFileCacheAttr.total_cache = 7 * 1024 * 1024; // 7M
-  stFileCacheAttr.write_cache = 256 * 1024; //1024 * 1024; // 1M
-  stFileCacheAttr.write_thread_arg.sched_policy = FILE_SCHED_FIFO;
-  stFileCacheAttr.write_thread_arg.priority = 99;
-  stFileCacheAttr.sdcard_arg.mount_sdcard = MountSdcard;
-  stFileCacheAttr.sdcard_arg.umount_sdcard = UmountSdcard;
-
-#ifdef ENABLE_AOV
-  stFileCacheAttr.sdcard_arg.lock = RKADK_AOV_WakeupLock;
-  stFileCacheAttr.sdcard_arg.unlock = RKADK_AOV_WakeupUnlock;
-#endif
-  RKADK_RECORD_FileCacheInit(&stFileCacheAttr);
-
-  stRecAttr.s32CamID = s32CamId;
-  stRecAttr.pfnRequestFileNames = GetRecordFileName;
-  stRecAttr.pfnEventCallback = RecordEventCallback;
-
-#ifdef ENABLE_AOV
-  stRecAttr.stAovAttr.pfnSingleFrame = SAMPLE_ISP_SingleFrame;
-  stRecAttr.stAovAttr.pfnMultiFrame = SAMPLE_ISP_MultiFrame;
-  stRecAttr.pfnMountSdcard = MountSdcard;
-#endif
-
-  if (RKADK_RECORD_Create(&stRecAttr, &pRecorder)) {
-    RKADK_LOGE("s32CamId[%d] Create recorder failed", s32CamId);
-#ifdef RKAIQ
-    SAMPLE_ISP_Stop(s32CamId);
-    if (bMultiCam)
-      SAMPLE_ISP_Stop(1);
-#endif
-    return -1;
-  }
-
-  if (osdfile) {
-    memset(&OsdAttr, 0, sizeof(RKADK_OSD_ATTR_S));
-    memset(&OsdStreamAttr, 0, sizeof(RKADK_OSD_STREAM_ATTR_S));
-    OsdAttr.Format = RKADK_FMT_ARGB8888;
-    OsdAttr.Width = u32OsdWidth;
-    OsdAttr.Height = u32OsdHeight;
-    OsdAttr.pData = malloc(OsdAttr.Height * OsdAttr.Width * 4);
-
-#ifdef RV1106_1103
-    OsdAttr.enOsdType = RKADK_OSD_TYPE_NORMAL;
-#else
-    OsdAttr.enOsdType = RKADK_OSD_TYPE_EXTRA;
-#endif
-
-    OsdStreamAttr.Origin_X = u32OsdX;
-    OsdStreamAttr.Origin_Y = u32OsdY;
-    OsdStreamAttr.bEnableShow = RKADK_TRUE;
-    OsdStreamAttr.enOsdType = OsdAttr.enOsdType;
-
-    RKADK_OSD_Init(u32OsdId, &OsdAttr);
-    RKADK_OSD_AttachToStream(u32OsdId, s32CamId, RKADK_STREAM_TYPE_VIDEO_MAIN, &OsdStreamAttr);
-
-    FILE *fp = fopen(osdfile, "rw");
-    if (!fp) {
-      RKADK_LOGP("open osd file fail");
-    } else {
-      RKADK_LOGP("open osd file success");
-      fread((RKADK_U8 *)OsdAttr.pData, OsdAttr.Width * OsdAttr.Height * 4, 1, fp);
-      fclose(fp);
-      RKADK_OSD_UpdateBitMap(u32OsdId, &OsdAttr);
-    }
-  }
-
-  RKADK_RECORD_Start(pRecorder);
-
-  if (bMultiSensor) {
-    stRecAttr.s32CamID = 1;
-    if (RKADK_RECORD_Create(&stRecAttr, &pRecorder1)) {
-      RKADK_LOGE("s32CamId[1] Create recorder failed");
-#ifdef RKAIQ
-      SAMPLE_ISP_Stop(s32CamId);
-      if (bMultiCam)
-        SAMPLE_ISP_Stop(1);
-#endif
-      return -1;
-    }
-
-    RKADK_RECORD_Start(pRecorder1);
-  }
-
-  RKADK_LOGP("initial finish\n");
-
-  signal(SIGINT, sigterm_handler);
-  char cmd[64];
-  printf("\n#Usage: input 'quit' to exit programe!\n"
-         "peress any other key to quit\n");
-
-  while (!is_quit) {
-    if (loopCount >= 0) {
-      sleep(loopDuration);
-      if (loopCount == 0) {
-        RKADK_LOGP("loop switch end!");
-        is_quit = true;
-        goto __EXIT;
-      }
-
-      RKADK_PARAM_GetCamParam(s32CamId, RKADK_PARAM_TYPE_RECORD_TYPE, &enRecType);
-      if (enRecType == RKADK_REC_TYPE_NORMAL) {
-        enRecType = RKADK_REC_TYPE_AOV_LAPSE;
-        printf("\n\n\n----- switch aov lapse record[%d] -----\n", loopCount);
-      } else {
-        printf("\n\n\n----- switch normal record[%d] -----\n", loopCount);
-        enRecType = RKADK_REC_TYPE_NORMAL;
-      }
-
-      RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_RECORD_TYPE, &enRecType);
-      RKADK_RECORD_Reset(&pRecorder);
-      RKADK_RECORD_FileCacheSetMode(enRecType);
-      RKADK_RECORD_Start(pRecorder);
-
-      loopCount--;
-    } else {
-      fgets(cmd, sizeof(cmd), stdin);
-      if (strstr(cmd, "quit") || is_quit) {
-        RKADK_LOGP("#Get 'quit' cmd!");
-        break;
-      } else if (strstr(cmd, "LR")) { //Lapse Record
-        enRecType = RKADK_REC_TYPE_LAPSE;
-        RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_RECORD_TYPE, &enRecType);
-        RKADK_RECORD_Reset(&pRecorder);
-        RKADK_RECORD_FileCacheSetMode(enRecType);
-        RKADK_RECORD_Start(pRecorder);
-      } else if (strstr(cmd, "NR")) { //Normal Record
-        enRecType = RKADK_REC_TYPE_NORMAL;
-        RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_RECORD_TYPE, &enRecType);
-        RKADK_RECORD_Reset(&pRecorder);
-        RKADK_RECORD_FileCacheSetMode(enRecType);
-        RKADK_RECORD_Start(pRecorder);
-      } else if (strstr(cmd, "720")) {
-        type = RKADK_RES_720P;
-        RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_RES, &type);
-        ret = RKADK_RECORD_Reset(&pRecorder);
-        if (ret < 0) {
-#ifndef RV1106_1103
-          RKADK_RECORD_Stop(pRecorder);
-          RKADK_RECORD_Destroy(pRecorder);
-          pRecorder = NULL;
-#ifdef RKAIQ
-          SAMPLE_ISP_Stop(stRecAttr.s32CamID);
-#endif
-          goto record;
-#endif
-        }
-        RKADK_RECORD_Start(pRecorder);
-      } else if (strstr(cmd, "1080")) {
-        type = RKADK_RES_1080P;
-        RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_RES, &type);
-        ret = RKADK_RECORD_Reset(&pRecorder);
-        if (ret < 0) {
-#ifndef RV1106_1103
-          RKADK_RECORD_Stop(pRecorder);
-          RKADK_RECORD_Destroy(pRecorder);
-          pRecorder = NULL;
-#ifdef RKAIQ
-          SAMPLE_ISP_Stop(stRecAttr.s32CamID);
-#endif
-          goto record;
-#endif
-        }
-        RKADK_RECORD_Start(pRecorder);
-      } else if (strstr(cmd, "264")) {
-        stCodecType.enCodecType = RKADK_CODEC_TYPE_H264;
-        stCodecType.enStreamType = RKADK_STREAM_TYPE_VIDEO_MAIN;
-        RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_CODEC_TYPE, &stCodecType);
-        stCodecType.enStreamType = RKADK_STREAM_TYPE_VIDEO_SUB;
-        RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_CODEC_TYPE, &stCodecType);
-        ret = RKADK_RECORD_Reset(&pRecorder);
-        if (ret < 0) {
-#ifndef RV1106_1103
-          RKADK_RECORD_Stop(pRecorder);
-          RKADK_RECORD_Destroy(pRecorder);
-          pRecorder = NULL;
-#ifdef RKAIQ
-          SAMPLE_ISP_Stop(stRecAttr.s32CamID);
-#endif
-          goto record;
-#endif
-        }
-        RKADK_RECORD_Start(pRecorder);
-      } else if (strstr(cmd, "265")) {
-        stCodecType.enCodecType = RKADK_CODEC_TYPE_H265;
-        stCodecType.enStreamType = RKADK_STREAM_TYPE_VIDEO_MAIN;
-        RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_CODEC_TYPE, &stCodecType);
-        stCodecType.enStreamType = RKADK_STREAM_TYPE_VIDEO_SUB;
-        RKADK_PARAM_SetCamParam(s32CamId, RKADK_PARAM_TYPE_CODEC_TYPE, &stCodecType);
-        ret = RKADK_RECORD_Reset(&pRecorder);
-        if (ret < 0) {
-#ifndef RV1106_1103
-          RKADK_RECORD_Stop(pRecorder);
-          RKADK_RECORD_Destroy(pRecorder);
-          pRecorder = NULL;
-#ifdef RKAIQ
-          SAMPLE_ISP_Stop(stRecAttr.s32CamID);
-#endif
-          goto record;
-#endif
-        }
-        RKADK_RECORD_Start(pRecorder);
-      } else if (strstr(cmd, "start")) {
-        RKADK_RECORD_Start(pRecorder);
-      } else if (strstr(cmd, "stop")) {
-        RKADK_RECORD_Stop(pRecorder);
-      }
-
-      usleep(500000);
-    }
-  }
-
-__EXIT:
-  if (osdfile) {
-    RKADK_OSD_DettachFromStream(u32OsdId, s32CamId, RKADK_STREAM_TYPE_VIDEO_MAIN);
-    RKADK_OSD_Deinit(u32OsdId);
-
-    if (OsdAttr.pData)
-      free(OsdAttr.pData);
-  }
-
-  RKADK_RECORD_Stop(pRecorder);
-  RKADK_RECORD_Destroy(pRecorder);
-
-#ifdef RKAIQ
-  SAMPLE_ISP_Stop(s32CamId);
-#endif
-
-  if (bMultiSensor) {
-    RKADK_RECORD_Stop(pRecorder1);
-    RKADK_RECORD_Destroy(pRecorder1);
-
-#ifdef RKAIQ
-    if (bMultiCam)
-      SAMPLE_ISP_Stop(1);
-#endif
-  }
-
-  RKADK_RECORD_FileCacheDeInit();
-  RKADK_MPI_SYS_Exit();
-
-#ifdef ENABLE_AOV
-    RKADK_AOV_DeInit();
-#endif
-
-  RKADK_PARAM_Deinit();
-  RKADK_LOGP("exit!");
-  return 0;
+    return AovRunner_Run(&runner_cfg, &g_running);
 }

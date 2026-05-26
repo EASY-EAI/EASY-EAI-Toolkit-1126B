@@ -21,6 +21,7 @@ Solutions/*/package/*/userdata
 Solutions/*/package/*.deb
 .qmake.stash
 UiSolutions/*/Release
+UiSolutions/*/Debug
 UiSolutions/*/*.user
 UiSolutions/*/Makefile
 

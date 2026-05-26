@@ -22,6 +22,23 @@
 
 重要更新：
 ---
+> 2026-05-26 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.1.2
+> * 更新 easyeai-api
+>     * 通用组件api
+>         * [新增] data_queue
+>     * 网络协议组件api
+>         * [新增] rtsp
+>     * 多媒体组件api
+>         * [新增] rockit_adapter
+>         * [新增] sdcard_recorder
+>         * [移除] rk_mpi
+>         * [移除] rkadk
+> * 更新【开发实例】
+>     * [更新] aov
+>     * [新增] avs
+>     * [新增] aiisp(黑光)
+>
 > 2026-05-08 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.1.1
 > * 更新 easyeai-api

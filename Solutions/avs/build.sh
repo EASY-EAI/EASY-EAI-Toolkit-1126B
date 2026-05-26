@@ -24,18 +24,18 @@ fi
 
 # build this project
 rm -rf build && mkdir build && cd build
-
 # cmake 参数说明:
 #   USE_RKAIQ         : 启用 Rockchip AIQ ISP 调试框架 (链接 lib_rkaiq.so)
 #   ENABLE_AOV        : 启用 AOV 低功耗常亮宏 (CMake 传递 -DENABLE_AOV)
+#   ENABLE_FILE_CACHE : 启用文件缓存支持
 #   OS_LINUX          : 目标系统 Linux (CMake 传递 -DOS_LINUX)
 cmake .. \
   -DUSE_RKAIQ=ON \
   -DENABLE_AOV=ON \
+  -DENABLE_FILE_CACHE=ON \
   -DOS_LINUX=ON \
   -DCMAKE_C_FLAGS="-Wno-error=format-security -Wno-unused-result -Wno-unused-function -Wno-format-truncation" \
   -DCMAKE_CXX_FLAGS="-Wno-error=format-security -Wno-unused-result -Wno-unused-function -Wno-format-truncation"
-
 make -j24
 
 # make Release files

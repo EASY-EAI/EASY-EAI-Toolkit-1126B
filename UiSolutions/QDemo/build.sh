@@ -21,9 +21,11 @@ set +e
 if [ "$1" = "all" ]; then
 	rm -f Makefile
 	rm -rf Release
+	rm -rf Debug
 elif [ "$1" = "clear" ];then
 	rm -f Makefile
 	rm -rf Release
+	rm -rf Debug
 	exit 0
 fi
 set -e
