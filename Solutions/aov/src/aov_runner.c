@@ -32,9 +32,18 @@
 #define DATA_QUEUE_ITEM_MAX (2 * 1024 * 1024)
 #define RAW_SPLIT_SEC 60
 
+/*
+ * Aov_EnterSleep() 的结果通过此全局标志传递给主循环。
+ * true  = 休眠失败（write /sys/power/state 返回错误），
+ *         主循环跳过重建管线，继续下一轮录像。
+ */
+static bool g_sleep_failed = false;
+
 /* ======================== AOV 休眠回调 ======================== */
 static void aov_notify_callback(AovEvent_e enEvent, void *msg)
 {
+    int sleep_ret;
+
     (void)msg;
     switch (enEvent) {
     case AOV_ENTER_SLEEP:
@@ -43,7 +52,38 @@ static void aov_notify_callback(AovEvent_e enEvent, void *msg)
         Aov_WakeupLock();
         printf("[AOV_RUNNER] fs sdcard lock\n");
         UmountSdcard();
-        Aov_EnterSleep();
+
+        /*
+         * 卸载 USB xhci 控制器驱动，避免其阻塞系统 suspend。
+         *
+         * 内核日志显示：
+         *   xhci-hcd xhci-hcd.0.auto: PM: failed to suspend async: error -22
+         */
+        Aov_DisableUSB();
+
+        /* 休眠前关闭非引导 CPU 核以降低漏电流 */
+        Aov_DisableNonBootCPUs();
+
+        /* 阻塞等待唤醒（写入 /sys/power/state） */
+        sleep_ret = Aov_EnterSleep();
+
+        /* 唤醒后恢复非引导 CPU */
+        Aov_EnableNonBootCPUs();
+
+        /* 唤醒后重新挂载 USB xhci 驱动 */
+        Aov_EnableUSB();
+
+        if (sleep_ret != 0) {
+            /*
+             * 休眠失败（即使 unbound USB，仍有其他设备拒绝 suspend），
+             * 标记失败，主循环会重建管线继续录像。
+             */
+            printf("[AOV_RUNNER] ++++ AOV_ENTER_SLEEP FAILED (%d) ++++\n", sleep_ret);
+            g_sleep_failed = true;
+        } else {
+            g_sleep_failed = false;
+        }
+
         Aov_WakeupUnlock();
         printf("[AOV_RUNNER] fs sdcard unlock\n");
         break;
@@ -249,14 +289,81 @@ int AovRunner_Run(const AovRunnerCfg_t *cfg, volatile bool *running)
                 fclose(fd);
                 fd = NULL;
             }
+
+            /*
+             * ★ 核心修复：休眠前必须停止并销毁整个摄像头管线
+             *
+             * 原因：如果 ISP/VI/VPSS/VENC 等硬件模块仍在运行中，
+             * 内核 suspend 时会因为设备 busy 而拒绝进入休眠，
+             * 导致写入 /sys/power/state 不生效，功耗无法下降。
+             */
+            CamPipe_Stop(pipe);
+            CamPipe_Destroy(pipe);
+            pipe = NULL;
+
+            /* 销毁并重新创建 DataQueue，清空残留帧数据 */
+            if (queue) {
+                DataQueue_Destroy(queue);
+                queue = NULL;
+            }
+
+            /* 重置休眠失败标志 */
+            g_sleep_failed = false;
+
+            /* 通知回调：卸载 SD 卡 + 关非引导 CPU + 进入休眠 */
             Aov_Notify(AOV_ENTER_SLEEP, NULL);
             if (!*running)
                 break;
 
-            printf("[AOV_RUNNER] loop %d: woke up, continuing...\n", loop_idx + 1);
-            
-            // 重新挂载 SD 卡
-            MountSdcard();
+            if (g_sleep_failed) {
+                /*
+                 * 休眠失败（如 xhci USB 控制器拒绝 suspend）。
+                 * 回调已经卸载了 SD 卡，这里需要重新挂载。
+                 * 不输出 "woke up" 信息，继续执行重建流程。
+                 */
+                printf("[AOV_RUNNER] ++++ sleep FAILED, rebuilding pipeline ++++\n");
+                MountSdcard();
+            } else {
+                printf("[AOV_RUNNER] loop %d: woke up, continuing...\n", loop_idx + 1);
+                /* 唤醒后重新挂载 SD 卡 */
+                MountSdcard();
+            }
+
+            /* 重建 DataQueue */
+            queue = DataQueue_Create(16, DATA_QUEUE_ITEM_MAX);
+            if (!queue) {
+                printf("[AOV_RUNNER] DataQueue_Create failed after wakeup\n");
+                goto cleanup;
+            }
+
+            /* 重新创建摄像头管线 */
+            pipe = CamPipe_Create((CamPipeCfg_t *)&cfg->pipe_cfg);
+            if (!pipe) {
+                printf("[AOV_RUNNER] CamPipe_Create failed after wakeup\n");
+                goto cleanup;
+            }
+
+            /* 重新注册帧回调 */
+            for (int i = 0; i < cfg->pipe_cfg.output_count; ++i) {
+                int route_id = cfg->pipe_cfg.outputs[i].route_id;
+                if (CamPipe_RegisterFrameCallback(pipe, route_id,
+                                                  frame_callback, queue) != 0) {
+                    printf("[AOV_RUNNER] register callback failed for route[%d] after wakeup\n",
+                           route_id);
+                    goto cleanup;
+                }
+            }
+
+            /* 重新启动管线 */
+            if (CamPipe_Start(pipe) != 0) {
+                printf("[AOV_RUNNER] CamPipe_Start failed after wakeup\n");
+                goto cleanup;
+            }
+
+            /* 重置分片时间戳，重新开始新的文件记录 */
+            current_file_start_pts = 0;
+        } else {
+            /* AOV 未启用时，不清除队列，继续下一轮录像 */
         }
 
         loop_idx++;

@@ -64,7 +64,7 @@ int  Aov_EnterSleep(void);
 
 /**
  * @brief 设置唤醒暂停时间
- * @param u32WakeupSuspendTime 唤醒暂停时间（单位：秒）
+ * @param u32WakeupSuspendTime 唤醒暂停时间（单位：毫秒）
  * @return 成功返回 0，失败返回负值
  */
 int  Aov_SetSuspendTime(int u32WakeupSuspendTime);
@@ -104,6 +104,20 @@ int  Aov_ReadReg(int addr, unsigned char *buf, int len);
  * @return 成功返回 0，失败返回负值
  */
 int  Aov_WriteReg(int addr, int value);
+
+/**
+ * @brief 休眠前卸载 USB xhci 控制器驱动，避免阻塞系统 suspend
+ *        通过 /sys/bus/platform/drivers/xhci-hcd/unbind 解绑
+ * @return 成功返回 0，失败返回 -1
+ */
+int  Aov_DisableUSB(void);
+
+/**
+ * @brief 唤醒后重新加载 USB xhci 控制器驱动
+ *        通过 /sys/bus/platform/drivers/xhci-hcd/bind 绑定
+ * @return 成功返回 0，失败返回 -1
+ */
+int  Aov_EnableUSB(void);
 
 #ifdef __cplusplus
 }

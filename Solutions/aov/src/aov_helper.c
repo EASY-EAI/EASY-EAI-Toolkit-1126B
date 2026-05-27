@@ -68,23 +68,21 @@ int Aov_EnterSleep(void)
     if (fd == -1) {
         printf("[AOV] Failed to open %s, errno=%d, %s\n",
                SOC_SLEEP_PATH, errno, strerror(errno));
-        goto exit;
+        return -1;
     }
 
     ret = write(fd, SOC_SLEEP_STR, strlen(SOC_SLEEP_STR));
     if (ret == -1) {
         printf("[AOV] Failed to write %s, errno=%d, %s\n",
                SOC_SLEEP_STR, errno, strerror(errno));
-        goto exit;
+        close(fd);
+        return -1;
     }
 
-    printf("[AOV] echo \"%s\" > %s successfully\n", SOC_SLEEP_STR, SOC_SLEEP_PATH);
-    ret = 0;
-
-exit:
-    if (fd >= 0)
-        close(fd);
-    return ret;
+    printf("[AOV] echo \"%s\" > %s successfully, system entered suspend\n",
+           SOC_SLEEP_STR, SOC_SLEEP_PATH);
+    close(fd);
+    return 0;
 }
 
 void Aov_Notify(AovEvent_e enEvent, void *msg)
@@ -217,6 +215,79 @@ int Aov_EnableNonBootCPUs(void)
         close(fd);
     }
     printf("[AOV] non-boot CPUs enabled\n");
+    return 0;
+}
+
+/* ======================== USB xhci 控制器（休眠前解绑/唤醒后重绑） ======================== */
+
+/*
+ * RV1126B USB xhci 控制器设备名和驱动路径。
+ *
+ * 内核日志显示：
+ *   xhci-hcd xhci-hcd.0.auto: PM: failed to suspend async: error -22
+ *
+ * 休眠前需将其从驱动解绑，避免阻塞系统 suspend；唤醒后重新绑定。
+ */
+#define XHCI_DEVICE_NAME    "xhci-hcd.0.auto"
+#define XHCI_DRIVER_PATH    "/sys/bus/platform/drivers/xhci-hcd"
+
+int Aov_DisableUSB(void)
+{
+    char path[128];
+    int fd;
+    ssize_t ret;
+
+    snprintf(path, sizeof(path), "%s/unbind", XHCI_DRIVER_PATH);
+    fd = open(path, O_WRONLY | O_NONBLOCK);
+    if (fd < 0) {
+        printf("[AOV] Failed to open %s for unbind, errno=%d, %s\n",
+               path, errno, strerror(errno));
+        return -1;
+    }
+
+    ret = write(fd, XHCI_DEVICE_NAME, strlen(XHCI_DEVICE_NAME));
+    if (ret < 0) {
+        printf("[AOV] Failed to unbind %s, errno=%d, %s\n",
+               XHCI_DEVICE_NAME, errno, strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    close(fd);
+    printf("[AOV] USB xhci unbound (%s from %s)\n", XHCI_DEVICE_NAME, XHCI_DRIVER_PATH);
+
+    /* 给内核一点时间完成解绑 */
+    usleep(10000);
+    return 0;
+}
+
+int Aov_EnableUSB(void)
+{
+    char path[128];
+    int fd;
+    ssize_t ret;
+
+    snprintf(path, sizeof(path), "%s/bind", XHCI_DRIVER_PATH);
+    fd = open(path, O_WRONLY | O_NONBLOCK);
+    if (fd < 0) {
+        printf("[AOV] Failed to open %s for bind, errno=%d, %s\n",
+               path, errno, strerror(errno));
+        return -1;
+    }
+
+    ret = write(fd, XHCI_DEVICE_NAME, strlen(XHCI_DEVICE_NAME));
+    if (ret < 0) {
+        printf("[AOV] Failed to bind %s, errno=%d, %s\n",
+               XHCI_DEVICE_NAME, errno, strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    close(fd);
+    printf("[AOV] USB xhci bound (%s to %s)\n", XHCI_DEVICE_NAME, XHCI_DRIVER_PATH);
+
+    /* 给内核一点时间完成绑定 */
+    usleep(10000);
     return 0;
 }
 
