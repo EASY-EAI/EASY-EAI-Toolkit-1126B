@@ -178,6 +178,22 @@ int CamPipe_Stop(CamPipeHandle handle);            /* 停止推流，反初始�
 int CamPipe_RegisterFrameCallback(CamPipeHandle handle, int route_id,
                                   CamPipeFrameCallback_t cb, void *user_data);
 
+/*
+ * AOV 低功耗休眠/唤醒优化接口
+ *
+ * CamPipe_Suspend:
+ *   停止流线程 → 暂停 ISP 3A（保留硬件） → 解绑 MPP 模块
+ *   不销毁 VI/VPSS/VENC，保留内核态资源，suspend/resume 后快速恢复
+ *
+ * CamPipe_Resume:
+ *   重新绑定 MPP 模块 → 恢复 ISP 3A → 请求 VENC IDR → 启动流线程
+ *
+ * 相比 CamPipe_Stop/CamPipe_Destroy + CamPipe_Create/CamPipe_Start，
+ * 可减少 300ms~1s+ 的唤醒到第一帧延迟。
+ */
+int CamPipe_Suspend(CamPipeHandle handle);
+int CamPipe_Resume(CamPipeHandle handle);
+
 #ifdef __cplusplus
 }
 #endif

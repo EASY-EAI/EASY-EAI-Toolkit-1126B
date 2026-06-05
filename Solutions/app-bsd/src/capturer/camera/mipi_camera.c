@@ -38,7 +38,7 @@
 /* 宏定义 */
 #define BUF_COUNT       2
 
-#define FMT_TYPE_MAX_NUM 8 //每个camera最多[FMT_TYPE_MAX_NUM]种格式
+#define FMT_TYPE_MAX_NUM 16 //每个camera最多[FMT_TYPE_MAX_NUM]种格式
 #define RES_MAX_NUM 8  //每种格式最多[RES_MAX_NUM]种分辨率
 typedef struct {
     int width;
@@ -195,7 +195,7 @@ static int v4l2_camera_init(mipi_camera_t *cam)
         frmsize.pixel_format = fmtdesc.pixelformat;
         frmsize.index = 0;
         while(ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &frmsize) != -1) {
-            if(frmsize.index < RES_MAX_NUM) { //注意，这里越界可能会有bug，完美解决需要用链表
+            if((fmtdesc.index < FMT_TYPE_MAX_NUM) && (frmsize.index < RES_MAX_NUM)) { //注意，这里越界可能会有bug，完美解决需要用链表
                 cam_fmts[fmtdesc.index].res[frmsize.index].width = frmsize.stepwise.max_width;
                 cam_fmts[fmtdesc.index].res[frmsize.index].height = frmsize.stepwise.max_height;
             }

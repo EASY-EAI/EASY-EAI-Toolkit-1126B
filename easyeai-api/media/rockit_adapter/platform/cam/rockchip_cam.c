@@ -34,7 +34,7 @@
 #endif
 
 #ifdef RKAIQ
-#include <rk_aiq_user_api_sysctl.h>
+#include <rk_aiq_user_api2_sysctl.h>
 #endif
 
 /* ======================== 内部数据结构 ======================== */
@@ -195,13 +195,13 @@ int rockchip_isp_init(Rk1126bCtx_t *ctx, CamIspCfg_t *cfg)
     setenv("HDR_MODE", hdr_str, 1);
 
     rk_aiq_static_info_t aiq_static_info;
-    rk_aiq_uapi_sysctl_enumStaticMetas(cfg->cam_id, &aiq_static_info);
+    rk_aiq_uapi2_sysctl_enumStaticMetas(cfg->cam_id, &aiq_static_info);
 
     printf("[CAM_ADAPTER] ISP: sensor_name is %s\n", aiq_static_info.sensor_info.sensor_name);
 
-    ctx->aiq_ctx = rk_aiq_uapi_sysctl_init(aiq_static_info.sensor_info.sensor_name, cfg->iq_file_dir, NULL, NULL);
+    ctx->aiq_ctx = rk_aiq_uapi2_sysctl_init(aiq_static_info.sensor_info.sensor_name, cfg->iq_file_dir, NULL, NULL);
     if (!ctx->aiq_ctx) {
-        printf("[CAM_ADAPTER] ISP: rk_aiq_uapi_sysctl_init failed\n");
+        printf("[CAM_ADAPTER] ISP: rk_aiq_uapi2_sysctl_init failed\n");
         return -1;
     }
 #endif
@@ -236,13 +236,13 @@ int rockchip_isp_run(Rk1126bCtx_t *ctx, int cam_id)
         wdr_mode = atoi(hdr_mode_env);
     }
 
-    if (rk_aiq_uapi_sysctl_prepare(ctx->aiq_ctx, 0, 0, wdr_mode)) {
-        printf("[CAM_ADAPTER] ISP: rk_aiq_uapi_sysctl_prepare failed\n");
+    if (rk_aiq_uapi2_sysctl_prepare(ctx->aiq_ctx, 0, 0, (rk_aiq_working_mode_t)wdr_mode)) {
+        printf("[CAM_ADAPTER] ISP: rk_aiq_uapi2_sysctl_prepare failed\n");
         return -1;
     }
 
-    if (rk_aiq_uapi_sysctl_start(ctx->aiq_ctx)) {
-        printf("[CAM_ADAPTER] ISP: rk_aiq_uapi_sysctl_start failed\n");
+    if (rk_aiq_uapi2_sysctl_start(ctx->aiq_ctx)) {
+        printf("[CAM_ADAPTER] ISP: rk_aiq_uapi2_sysctl_start failed\n");
         return -1;
     }
     
@@ -825,10 +825,18 @@ int rockchip_get_venc_stream(Rk1126bCtx_t *ctx, int chn_id, int codec_type,
         }
 
         int is_keyframe = 0;
+        /*
+         * VENC_GOPMODE_NORMALP 模式下，GOP 周期的 I 帧类型为 ISLICE（值=2），
+         * 首个 IDR 帧类型为 IDRSLICE（H264=5, H265=19）。
+         * 两种 NALU 类型都应视为关键帧，否则后续 I 帧会被漏判，
+         * 导致分片不准和 keyframe 日志只打印一次。
+         */
         if (codec_type == CAM_ADAPTER_CODEC_H264) {
-            is_keyframe = (vc->stream.pstPack->DataType.enH264EType == H264E_NALU_IDRSLICE) ? 1 : 0;
+            is_keyframe = (vc->stream.pstPack->DataType.enH264EType == H264E_NALU_IDRSLICE ||
+                           vc->stream.pstPack->DataType.enH264EType == H264E_NALU_ISLICE) ? 1 : 0;
         } else if (codec_type == CAM_ADAPTER_CODEC_H265) {
-            is_keyframe = (vc->stream.pstPack->DataType.enH265EType == H265E_NALU_IDRSLICE) ? 1 : 0;
+            is_keyframe = (vc->stream.pstPack->DataType.enH265EType == H265E_NALU_IDRSLICE ||
+                           vc->stream.pstPack->DataType.enH265EType == H265E_NALU_ISLICE) ? 1 : 0;
         }
 
         frame->data = vaddr;
@@ -1032,8 +1040,8 @@ int rockchip_isp_stop(Rk1126bCtx_t *ctx, int cam_id) {
 
 #ifdef RKAIQ
     if (ctx->aiq_ctx) {
-        rk_aiq_uapi_sysctl_stop(ctx->aiq_ctx, false);
-        rk_aiq_uapi_sysctl_deinit(ctx->aiq_ctx);
+        rk_aiq_uapi2_sysctl_stop(ctx->aiq_ctx, false);
+        rk_aiq_uapi2_sysctl_deinit(ctx->aiq_ctx);
         ctx->aiq_ctx = NULL;
     }
 #endif
@@ -1042,6 +1050,63 @@ int rockchip_isp_stop(Rk1126bCtx_t *ctx, int cam_id) {
 
     ctx->isp_inited = false;
     return 0;
+}
+
+/**
+ * @brief 暂停 ISP 3A 算法（AOV 休眠前调用）
+ *        仅 pause AIQ 3A 线程，不停止 ISP 硬件和 sensor 时钟，
+ *        唤醒后 rockchip_isp_resume 可快速恢复。
+ * @param ctx 平台上下文
+ * @return 成功返回 0，失败返回 -1
+ */
+int rockchip_isp_pause(Rk1126bCtx_t *ctx)
+{
+    if (!ctx || !ctx->isp_inited)
+        return -1;
+
+#ifdef RKAIQ
+    if (ctx->aiq_ctx) {
+        printf("[CAM_ADAPTER] ISP: pause 3A (cam%d)\n", ctx->cam_id);
+        rk_aiq_uapi2_sysctl_pause(ctx->aiq_ctx, true);
+    }
+#endif
+    return 0;
+}
+
+/**
+ * @brief 恢复 ISP 3A 算法（AOV 唤醒后调用）
+ *        快速恢复 AIQ 3A 统计处理，无需重新加载 IQ 文件或重启 sensor。
+ * @param ctx 平台上下文
+ * @return 成功返回 0，失败返回 -1
+ */
+int rockchip_isp_resume(Rk1126bCtx_t *ctx)
+{
+    if (!ctx || !ctx->isp_inited)
+        return -1;
+
+#ifdef RKAIQ
+    if (ctx->aiq_ctx) {
+        printf("[CAM_ADAPTER] ISP: resume 3A (cam%d)\n", ctx->cam_id);
+        rk_aiq_uapi2_sysctl_resume(ctx->aiq_ctx);
+    }
+#endif
+    return 0;
+}
+
+/**
+ * @brief 请求 VENC 通道立即输出 IDR 关键帧
+ *        用于唤醒后加速首帧产出，避免等待 GOP 周期
+ * @param ctx 平台上下文
+ * @param chn_id VENC 通道 ID
+ * @return 成功返回 0，失败返回 -1
+ */
+int rockchip_venc_request_idr(Rk1126bCtx_t *ctx, int chn_id)
+{
+    if (!ctx)
+        return -1;
+
+    printf("[CAM_ADAPTER] VENC: request IDR on chn[%d]\n", chn_id);
+    return RK_MPI_VENC_RequestIDR(chn_id, RK_TRUE);
 }
 
 /**

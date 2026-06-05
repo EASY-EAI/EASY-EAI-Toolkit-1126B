@@ -242,6 +242,8 @@ int rockchip_destroy(Rk1126bCtx_t *ctx);                /* 销毁上下文，释
 int rockchip_isp_init(Rk1126bCtx_t *ctx, CamIspCfg_t *cfg); /* 初始化 ISP */
 int rockchip_isp_run(Rk1126bCtx_t *ctx, int cam_id);         /* 启动 ISP 运行 */
 int rockchip_isp_stop(Rk1126bCtx_t *ctx, int cam_id);        /* 停止 ISP */
+int rockchip_isp_pause(Rk1126bCtx_t *ctx);                   /* 暂停 ISP 3A 算法（AOV 休眠前调用，保留硬件） */
+int rockchip_isp_resume(Rk1126bCtx_t *ctx);                  /* 恢复 ISP 3A 算法（AOV 唤醒后调用，恢复硬件） */
 
 /*
  * VI (视频输入) 模块
@@ -266,6 +268,7 @@ int rockchip_avs_deinit(Rk1126bCtx_t *ctx, int grp_id);           /* 去初始�
  */
 int rockchip_venc_init(Rk1126bCtx_t *ctx, CamVencCfg_t *cfg);     /* 初始化 VENC */
 int rockchip_venc_deinit(Rk1126bCtx_t *ctx, int venc_chn);        /* 去初始化 VENC */
+int rockchip_venc_request_idr(Rk1126bCtx_t *ctx, int chn_id);     /* 请求 VENC 立即输出 IDR 关键帧 */
 
 /*
  * 编码帧数据，由 rockchip_get_venc_stream 填充

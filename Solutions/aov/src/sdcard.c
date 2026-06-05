@@ -267,6 +267,76 @@ static int check_sdcard_mount(void)
     return ret;
 }
 
+/* ======================== 轻量版挂载/卸载（跳过 unbind/bind，AOV 休眠优化） ======================== */
+
+/*
+ * 轻量卸载：仅 umount，跳过驱动解绑（unbind）。
+ * 系统 suspend 通过 MNT_DETACH 延迟卸载，内核在 freeze 时自动处理块设备。
+ * 节省 unbind_sdcard() 中 netlink 5s 超时等待。
+ */
+int UmountSdcardLight(void)
+{
+    int ret = 0;
+
+    printf("[SDCARD] Enter light umount\n");
+
+    if (check_sdcard_mount() != 0) {
+        printf("[SDCARD] already umount\n");
+        return 0;
+    }
+
+    ret = umount2(SDCARD_MOUNT_PATH, MNT_DETACH);
+    if (ret == 0)
+        printf("[SDCARD] light unmount success\n");
+    else
+        printf("[SDCARD] light unmount failed because %s\n", strerror(errno));
+
+    printf("[SDCARD] Exit light umount\n");
+    return ret;
+}
+
+/*
+ * 轻量挂载：仅 mount，跳过驱动绑定（bind）。
+ * 唤醒时 dwmmc 驱动仍在绑定状态，mmc 块设备依然可用。
+ * 直接 mount 分区即可，节省 bind_sdcard() 中 netlink 5s 超时等待。
+ */
+int MountSdcardLight(void)
+{
+    int ret = 0;
+
+    printf("[SDCARD] Enter light mount\n");
+
+    if (check_sdcard_mount() == 0) {
+        printf("[SDCARD] already mount\n");
+        return 0;
+    }
+
+    if (access(MOUNT_DEV_1, F_OK) == 0) {
+        ret = mount(MOUNT_DEV_1, SDCARD_MOUNT_PATH, "vfat", 0, NULL);
+        if (ret != 0)
+            printf("[SDCARD] light mount failed, errno = %s\n", strerror(errno));
+        else
+            printf("[SDCARD] light mount success\n");
+    } else if (access(MOUNT_DEV_2, F_OK) == 0) {
+        ret = mount(MOUNT_DEV_2, SDCARD_MOUNT_PATH, "vfat", 0, NULL);
+        if (ret != 0)
+            printf("[SDCARD] light mount failed, errno = %s\n", strerror(errno));
+        else
+            printf("[SDCARD] light mount success\n");
+    } else {
+        printf("[SDCARD] bad mount path!\n");
+        ret = -1;
+    }
+
+    if (ret == 0 && check_sdcard_mount() != 0) {
+        printf("[SDCARD] Not found mount sdcard on %s\n", SDCARD_MOUNT_PATH);
+        ret = -1;
+    }
+
+    printf("[SDCARD] Exit light mount\n");
+    return ret;
+}
+
 /* ======================== 公开接口 ======================== */
 
 int MountSdcard(void)
@@ -319,7 +389,16 @@ int UmountSdcard(void)
         return 0;
     }
 
-    ret = umount2(SDCARD_MOUNT_PATH, MNT_DETACH);
+    /*
+     * ★ 关键修复：使用常规同步 umount（而不是 MNT_DETACH）来确保所有 dirty page
+     * cache 数据被刷入 SD 卡物理介质后再卸载驱动。
+     *
+     * 如果使用 MNT_DETACH（延迟卸载）后再 unbind 驱动，MMC 驱动被移除时尚未落盘
+     * 的缓存数据会永久丢失，导致录像文件虽存在但内容为空。
+     *
+     * 常规 umount 内部会先 sync 所有脏页到块设备，确保数据完整性后才分离挂载点。
+     */
+    ret = umount2(SDCARD_MOUNT_PATH, 0);
     if (ret == 0)
         printf("[SDCARD] unmount success\n");
     else

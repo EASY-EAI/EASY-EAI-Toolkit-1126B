@@ -24,6 +24,20 @@ int MountSdcard(void);
  */
 int UmountSdcard(void);
 
+/**
+ * @brief 轻量挂载 SD 卡（跳过驱动绑定，AOV 唤醒优化）
+ *        唤醒后 dwmmc 驱动仍在绑定状态，直接 mount 即可。
+ * @return 成功返回 0，失败返回 -1
+ */
+int MountSdcardLight(void);
+
+/**
+ * @brief 轻量卸载 SD 卡（跳过驱动解绑，AOV 休眠优化）
+ *        仅 umount，系统 suspend 会自动处理块设备。
+ * @return 成功返回 0，失败返回 -1
+ */
+int UmountSdcardLight(void);
+
 #ifdef __cplusplus
 }
 #endif

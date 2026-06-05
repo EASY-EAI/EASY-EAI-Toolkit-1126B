@@ -9,9 +9,18 @@
  *   fopen/fwrite → SD卡 原始h26x流
  *
  * 休眠循环（loop_count 控制循环次数，<=0 表示无限循环）：
- *   录像 loop_duration_sec 秒 → 关闭分片 → 进入系统休眠 suspend_time_ms
- *   → 唤醒 → 挂载 SD 卡 → 继续录像
+ *   录像 loop_duration_sec 秒 → 关闭分片 → CamPipe_Suspend（保留管线）
+ *   → 轻量卸载 SD → 关USB → 关非引导CPU → 进入系统休眠 suspend_time_ms
+ *   → 唤醒 → 恢复CPU/USB（异步） → 轻量挂载 SD
+ *   → CamPipe_Resume（恢复ISP 3A + 绑定 + 请求IDR） → 继续录像
  *   → 下一轮循环
+ *
+ * 优化：
+ *   1. ISP pause/resume 替代 stop/init/run（节省 IQ 文件加载）
+ *   2. 保留 MPP 管线，仅 suspend/resume（节省 VI/VPSS/VENC 重建）
+ *   3. SD 卡轻量 mount/umount（跳过 netlink 5s 超时等待）
+ *   4. 唤醒后主动请求 VENC IDR（加速首帧产出）
+ *   5. CPU/USB 异步恢复（不阻塞首帧输出）
  */
 
 #include "aov_runner.h"
@@ -30,7 +39,7 @@
 #include <unistd.h>
 
 #define DATA_QUEUE_ITEM_MAX (2 * 1024 * 1024)
-#define RAW_SPLIT_SEC 60
+#define RAW_SPLIT_SEC 60*4
 
 /*
  * Aov_EnterSleep() 的结果通过此全局标志传递给主循环。
@@ -40,6 +49,21 @@
 static bool g_sleep_failed = false;
 
 /* ======================== AOV 休眠回调 ======================== */
+
+/*
+ * 休眠回调在 Aov_EnterSleep() 调用前/后执行。
+ *
+ * 【AOV 休眠前】：
+ *   1. UmountSdcardLight — 仅 umount，跳过 unbind（节省 netlink 5s 等待）
+ *   2. Aov_DisableUSB — 解绑 xhci，避免阻塞 suspend
+ *   3. Aov_DisableNonBootCPUs — 休眠前关非引导核降漏电
+ *   4. Aov_EnterSleep — 阻塞，等待 RTC 唤醒
+ *
+ * 【AOV 唤醒后】：
+ *   回调内不再做 CPU/USB 恢复，而是将这个操作移到主循环中异步执行，
+ *   避免在 WakeupLock 持有的关键路径上增加延迟。
+ *   CPU/USB 的恢复不依赖 MPP 管线，可以和 RecordLoop 并行。
+ */
 static void aov_notify_callback(AovEvent_e enEvent, void *msg)
 {
     int sleep_ret;
@@ -51,7 +75,9 @@ static void aov_notify_callback(AovEvent_e enEvent, void *msg)
 
         Aov_WakeupLock();
         printf("[AOV_RUNNER] fs sdcard lock\n");
-        UmountSdcard();
+
+        /* ★ 优化3：轻量卸载 SD 卡，跳过驱动解绑（unbind），节省 ~100ms */
+        UmountSdcardLight();
 
         /*
          * 卸载 USB xhci 控制器驱动，避免其阻塞系统 suspend。
@@ -67,11 +93,11 @@ static void aov_notify_callback(AovEvent_e enEvent, void *msg)
         /* 阻塞等待唤醒（写入 /sys/power/state） */
         sleep_ret = Aov_EnterSleep();
 
-        /* 唤醒后恢复非引导 CPU */
-        Aov_EnableNonBootCPUs();
-
-        /* 唤醒后重新挂载 USB xhci 驱动 */
-        Aov_EnableUSB();
+        /*
+         * ★★ 优化5：唤醒后不在回调中恢复 CPU/USB，而是推迟到主循环异步执行。
+         * 回调持有 WakeupLock，应尽快释放，让主循环可以恢复管线。
+         * CPU/USB 恢复可以和录像并行，不阻塞首帧。
+         */
 
         if (sleep_ret != 0) {
             /*
@@ -145,17 +171,23 @@ static void make_file_path(const char *dir, const char *prefix, bool use_h265,
 /*
  * 从队列取帧直接写入 SD 卡，持续 sec 秒或直到 *running 变为 false
  */
-static void record_loop(DataQueueHandle queue, FILE **fd_ptr, const char *rec_dir, 
-                        const char *rec_prefix, bool use_h265, int fps, 
-                        int duration_sec, volatile bool *running, 
+static void record_loop(DataQueueHandle queue, FILE **fd_ptr, const char *rec_dir,
+                        const char *rec_prefix, bool use_h265, int fps,
+                        int duration_sec, volatile bool *running,
                         uint64_t *current_file_start_pts)
 {
     time_t deadline = time(NULL) + duration_sec;
+    int frame_count = 0;
+    int file_count = 0;
+
+    printf("[RECORD_LOOP] START: recording for %d seconds\n", duration_sec);
 
     while (*running) {
         time_t now = time(NULL);
-        if (now >= deadline)
+        if (now >= deadline) {
+            printf("[RECORD_LOOP] END: deadline reached (%d frames, %d files)\n", frame_count, file_count);
             break;
+        }
 
         void *buf = NULL;
         unsigned int buf_size = 0;
@@ -196,7 +228,8 @@ static void record_loop(DataQueueHandle queue, FILE **fd_ptr, const char *rec_di
                     *fd_ptr = fopen(file_path, "wb");
                     if (*fd_ptr) {
                         *current_file_start_pts = meta.timestamp;
-                        printf("[AOV_RUNNER] new file: %s\n", file_path);
+                        file_count++;
+                        printf("[AOV_RUNNER] >>>> new file #%d: %s <<<<\n", file_count, file_path);
                     } else {
                         printf("[AOV_RUNNER] fopen failed: %s\n", file_path);
                     }
@@ -205,10 +238,11 @@ static void record_loop(DataQueueHandle queue, FILE **fd_ptr, const char *rec_di
                 if (*fd_ptr) {
                     void *payload = (unsigned char *)buf + sizeof(FrameMeta_t);
                     fwrite(payload, 1, meta.data_len, *fd_ptr);
+                    frame_count++;
 
                     if (fps > 0 && meta.is_keyframe) {
-                        printf("[AOV_RUNNER] route[%d] pts:%llu size:%u keyframe\n",
-                               meta.tag, meta.timestamp, meta.data_len);
+                        printf("[AOV_RUNNER] route[%d] pts:%llu size:%u keyframe (total frames: %d)\n",
+                               meta.tag, meta.timestamp, meta.data_len, frame_count);
                     }
                 }
             }
@@ -217,6 +251,21 @@ static void record_loop(DataQueueHandle queue, FILE **fd_ptr, const char *rec_di
             usleep(5000);
         }
     }
+}
+
+/* ======================== 异步 CPU/USB 恢复线程 ======================== */
+static void *async_recover_thread(void *arg)
+{
+    (void)arg;
+
+    printf("[AOV_RUNNER] async: recovering non-boot CPUs...\n");
+    Aov_EnableNonBootCPUs();
+
+    printf("[AOV_RUNNER] async: re-binding USB xhci...\n");
+    Aov_EnableUSB();
+
+    printf("[AOV_RUNNER] async: recovery done\n");
+    return NULL;
 }
 
 /* ======================== 主入口 ======================== */
@@ -275,103 +324,154 @@ int AovRunner_Run(const AovRunnerCfg_t *cfg, volatile bool *running)
            cfg->loop_duration_sec, cfg->suspend_time_ms);
 
     while (*running) {
-        printf("[AOV_RUNNER] ==== loop %d: recording %ds ====\n",
-               loop_idx + 1, cfg->loop_duration_sec);
+        printf("[AOV_RUNNER] >>>>>> loop %d START: recording %ds, loop_count=%d >>>>>>\n",
+               loop_idx + 1, cfg->loop_duration_sec, cfg->loop_count);
 
         record_loop(queue, &fd, cfg->rec_dir, cfg->rec_prefix, cfg->use_h265,
                     cfg->fps, cfg->loop_duration_sec, running, &current_file_start_pts);
 
-        if (!*running)
-            break;
+        printf("[AOV_RUNNER] <<<<<< loop %d END: record_loop returned\n", loop_idx + 1);
 
-        if (cfg->enable_aov) {
-            if (fd) {
-                fclose(fd);
-                fd = NULL;
-            }
+        if (!*running) {
+            printf("[AOV_RUNNER] *running is false, breaking out of main loop\n");
+            break;
+        }
+
+        /*
+         * 检查是否已经是最后一轮：如果 loop_idx+1 == loop_count，说明当前是最后一轮，
+         * 录像完成后不应再进入 AOV 休眠，否则程序会永久阻塞在系统休眠中。
+         */
+        int is_last_loop = (cfg->loop_count > 0 && loop_idx + 1 >= cfg->loop_count);
+        
+        if (cfg->enable_aov && !is_last_loop) {
+            /*
+             * 注意：不再关闭 fd，让文件跨 loop 持续写入。
+             * 分片完全由 record_loop 内的 RAW_SPLIT_SEC 宏控制。
+             */
 
             /*
-             * ★ 核心修复：休眠前必须停止并销毁整个摄像头管线
-             *
-             * 原因：如果 ISP/VI/VPSS/VENC 等硬件模块仍在运行中，
-             * 内核 suspend 时会因为设备 busy 而拒绝进入休眠，
-             * 导致写入 /sys/power/state 不生效，功耗无法下降。
+             * 使用 CamPipe_Suspend 轻量暂停管线。
+             * 停止流线程 → 暂停 ISP 3A → drain VENC → 请求 IDR。
+             * 不销毁 VI/VPSS/VENC 硬件，唤醒后快速恢复。
              */
-            CamPipe_Stop(pipe);
-            CamPipe_Destroy(pipe);
-            pipe = NULL;
-
-            /* 销毁并重新创建 DataQueue，清空残留帧数据 */
-            if (queue) {
-                DataQueue_Destroy(queue);
-                queue = NULL;
+            ret = CamPipe_Suspend(pipe);
+            if (ret != 0) {
+                printf("[AOV_RUNNER] CamPipe_Suspend failed, fallback to Stop+Destroy\n");
+                CamPipe_Stop(pipe);
+                CamPipe_Destroy(pipe);
+                pipe = NULL;
             }
+
+            /* 清空 DataQueue 残留帧，避免旧帧污染新录像 */
+            DataQueue_Flush(queue);
 
             /* 重置休眠失败标志 */
             g_sleep_failed = false;
 
-            /* 通知回调：卸载 SD 卡 + 关非引导 CPU + 进入休眠 */
+            /* 通知回调：轻量卸载 SD → 关USB → 关非引导CPU → 进入休眠 */
             Aov_Notify(AOV_ENTER_SLEEP, NULL);
             if (!*running)
                 break;
 
             if (g_sleep_failed) {
-                /*
-                 * 休眠失败（如 xhci USB 控制器拒绝 suspend）。
-                 * 回调已经卸载了 SD 卡，这里需要重新挂载。
-                 * 不输出 "woke up" 信息，继续执行重建流程。
-                 */
-                printf("[AOV_RUNNER] ++++ sleep FAILED, rebuilding pipeline ++++\n");
-                MountSdcard();
+                printf("[AOV_RUNNER] ++++ sleep FAILED, recovering ++++\n");
+
+                /* 休眠失败，回调已做 UmountSdcardLight + DisableUSB + DisableCPUs */
+                /* 需要恢复：CPU → USB → 挂载 SD */
+                Aov_EnableNonBootCPUs();
+                Aov_EnableUSB();
+
+                if (pipe) {
+                    /* 管线已 suspend，恢复 */
+                    CamPipe_Resume(pipe);
+                } else {
+                    /* 回退到完整重建 */
+                    MountSdcard();
+                    queue = DataQueue_Create(16, DATA_QUEUE_ITEM_MAX);
+                    if (!queue) goto cleanup;
+                    pipe = CamPipe_Create((CamPipeCfg_t *)&cfg->pipe_cfg);
+                    if (!pipe) goto cleanup;
+                    for (int i = 0; i < cfg->pipe_cfg.output_count; ++i) {
+                        CamPipe_RegisterFrameCallback(pipe, cfg->pipe_cfg.outputs[i].route_id,
+                                                      frame_callback, queue);
+                    }
+                    CamPipe_Start(pipe);
+                }
             } else {
                 printf("[AOV_RUNNER] loop %d: woke up, continuing...\n", loop_idx + 1);
-                /* 唤醒后重新挂载 SD 卡 */
-                MountSdcard();
-            }
 
-            /* 重建 DataQueue */
-            queue = DataQueue_Create(16, DATA_QUEUE_ITEM_MAX);
-            if (!queue) {
-                printf("[AOV_RUNNER] DataQueue_Create failed after wakeup\n");
-                goto cleanup;
-            }
+                /*
+                 * ★★ 优化5：异步恢复 CPU/USB，不阻塞首帧
+                 *
+                 * CPU/USB 恢复不依赖 MPP 管线，可以与管线恢复并行。
+                 * 这里先执行 CamPipe_Resume（恢复 ISP 3A + 绑定 + IDR），
+                 * CPU/USB 恢复在异步线程中并行完成。
+                 */
+                pthread_t recover_tid = 0;
+                if (pthread_create(&recover_tid, NULL, async_recover_thread,
+                                   NULL) != 0) {
+                    /* 异步创建失败，同步执行 */
+                    Aov_EnableNonBootCPUs();
+                    Aov_EnableUSB();
+                }
 
-            /* 重新创建摄像头管线 */
-            pipe = CamPipe_Create((CamPipeCfg_t *)&cfg->pipe_cfg);
-            if (!pipe) {
-                printf("[AOV_RUNNER] CamPipe_Create failed after wakeup\n");
-                goto cleanup;
-            }
+                /* ★ 优化4：轻量挂载 SD 卡，跳过驱动绑定，节省 ~100ms */
+                MountSdcardLight();
 
-            /* 重新注册帧回调 */
-            for (int i = 0; i < cfg->pipe_cfg.output_count; ++i) {
-                int route_id = cfg->pipe_cfg.outputs[i].route_id;
-                if (CamPipe_RegisterFrameCallback(pipe, route_id,
-                                                  frame_callback, queue) != 0) {
-                    printf("[AOV_RUNNER] register callback failed for route[%d] after wakeup\n",
-                           route_id);
-                    goto cleanup;
+                if (pipe) {
+                    /*
+                     * ★★ 优化1+2+4：CamPipe_Resume
+                     * 恢复 ISP 3A + 重绑定 MPP + 请求 VENC IDR + 启动流线程
+                     */
+                    if (CamPipe_Resume(pipe) != 0) {
+                        printf("[AOV_RUNNER] CamPipe_Resume failed, fallback to full rebuild\n");
+                        /* Resume 失败，管线处于不一致状态，需要完全重建 */
+                        CamPipe_Destroy(pipe);
+                        pipe = NULL;
+                    }
+                }
+                
+                if (!pipe) {
+                    /* 回退到完整重建 */
+                    printf("[AOV_RUNNER] Rebuilding pipeline from scratch...\n");
+                    pipe = CamPipe_Create((CamPipeCfg_t *)&cfg->pipe_cfg);
+                    if (!pipe) {
+                        printf("[AOV_RUNNER] CamPipe_Create failed during rebuild\n");
+                        goto cleanup;
+                    }
+                    for (int i = 0; i < cfg->pipe_cfg.output_count; ++i) {
+                        CamPipe_RegisterFrameCallback(pipe, cfg->pipe_cfg.outputs[i].route_id,
+                                                      frame_callback, queue);
+                    }
+                    if (CamPipe_Start(pipe) != 0) {
+                        printf("[AOV_RUNNER] CamPipe_Start failed during rebuild\n");
+                        goto cleanup;
+                    }
+                }
+
+                /* 等待异步 CPU/USB 恢复完成 */
+                if (recover_tid) {
+                    pthread_join(recover_tid, NULL);
                 }
             }
-
-            /* 重新启动管线 */
-            if (CamPipe_Start(pipe) != 0) {
-                printf("[AOV_RUNNER] CamPipe_Start failed after wakeup\n");
-                goto cleanup;
-            }
-
-            /* 重置分片时间戳，重新开始新的文件记录 */
-            current_file_start_pts = 0;
         } else {
             /* AOV 未启用时，不清除队列，继续下一轮录像 */
         }
 
         loop_idx++;
+        printf("[AOV_RUNNER] loop_idx=%d, loop_count=%d, *running=%d\n",
+               loop_idx, cfg->loop_count, *running);
+        
         if (cfg->loop_count > 0 && loop_idx >= cfg->loop_count) {
-            printf("[AOV_RUNNER] loop_count=%d reached, exiting\n", cfg->loop_count);
+            printf("[AOV_RUNNER] >>>> loop_count=%d reached, exiting after %d loops <<<<\n",
+                   cfg->loop_count, loop_idx);
             break;
         }
+        
+        printf("[AOV_RUNNER] >>>> continuing to next loop <<<<\n");
     }
+    
+    printf("[AOV_RUNNER] Main loop exited after %d loops\n", loop_idx);
 
     ret = 0;
 
@@ -386,6 +486,15 @@ cleanup:
         CamPipe_Destroy(pipe);
     }
 
+    /*
+     * ★ 关键修复：确保所有 fwrite/fclose 的数据已从 page cache 刷入 SD 卡物理介质。
+     *
+     * fclose() 仅将数据提交到 kernel page cache，若在 UmountSdcard() 的
+     * umount2(MNT_DETACH) + unbind 前未 sync，MMC 驱动移除时未落盘的数据会丢失，
+     * 导致录像文件虽被 fclose() 但实际文件为空/不存在。
+     */
+    sync();
+
     UmountSdcard();
 
     if (cfg->enable_aov) {
@@ -395,7 +504,5 @@ cleanup:
     printf("[AOV_RUNNER] exit!\n");
     return ret;
 }
-
-
 
 
