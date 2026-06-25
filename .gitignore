@@ -31,4 +31,7 @@ logCfg
 
 docs/
 
+# Internal aov refactor repository (managed separately)
+aov_refactor/
+
 
