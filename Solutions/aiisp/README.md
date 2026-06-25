@@ -2,197 +2,117 @@
 
 ## 1. 功能概览
 
-当前 `Solutions/aiisp` 基于图式配置的媒体管线方案，实现 **AI-ISP 黑光增强 + 编码推流**。
-AI-ISP 模型运行在 VPSS 模块上，对 VI 输入的图像进行低照度增强后再送入 VENC 编码。
+`Solutions/aiisp` 在 rv1126b 上通过 **rkaiq 内部 AIBNR 链路**启用 AI-ISP 黑光降噪，
+不依赖 `librkpostisp.so`（该库在 rv1126b SDK 中未提供），不调用 `RK_MPI_VPSS_SetGrpAIISPAttr`。
 
-支持：
+AIBNR 激活后以 10fps 对 Bayer 域进行 NPU 推理降噪，再由 ISP 完成后续处理。
 
-- 单目 / 双目
-- 主码流 / 子码流
-- 两种绑定模式：`VI -> VPSS -> VENC`（推荐）和 `VI -> VENC`（直绑）
+数据流：
 
-当前入口程序：
-
-- `src/rkadk_aiisp_test.c`
-
-运行调度：
-
-- `src/aiisp_runner.c`
-
-底层接口：
-
-- `../../easyeai-api/media/rockit_adapter/camera/pipeline.h`
-- `../../easyeai-api/media/rockit_adapter/platform/rockchip_cam.h`
-
-## 2. 两种绑定模式
-
-### 2.1 `VI -> VPSS -> VENC`（推荐，AI-ISP 必须用此模式）
-
-VPSS 层承载 AI-ISP 模型，同时可分主/子码流。
-
-```text
-cam0
-  ISP0
-    |
-    v
-  VI0
-    |
-    v
-  VPSS_GRP0 + AI-ISP 模型
-    |------ chn0 ------> VENC0 ------> RTSP route0 (主码流)
-    |
-    |------ chn1 ------> VENC1 ------> RTSP route1 (子码流)
-
-cam1（可选）
-  ISP1
-    |
-    v
-  VI1
-    |
-    v
-  VPSS_GRP1 + AI-ISP 模型
-    |------ chn0 ------> VENC2 ------> RTSP route2
-    |
-    |------ chn1 ------> VENC3 ------> RTSP route3
+```
+sensor(sc450ai) -> ISP(rkaiq AIBNR) -> VI[0] -> VPSS[0] -+-> VENC[0] -> RTSP /live/0  (主码流)
+                                                           |
+                                                           +-> VENC[1] -> RTSP /live/1  (子码流)
 ```
 
-### 2.2 `VI -> VENC`
+## 2. 目录结构
 
-轻量直绑，不经过 VPSS，不支持 AI-ISP。
-
-```text
-cam0: ISP0 -> VI0 -> VENC0 -> RTSP route0
-cam1: ISP1 -> VI1 -> VENC1 -> RTSP route1
+```
+aiisp/
+├── src/
+│   └── aiisp_rtsp.c                       # 主程序
+├── res/
+│   └── iqfiles/
+│       ├── sc450ai_CRK4F4209_styleTstP0.json   # IQ 文件(aibnr.en=1，P0 风格)
+│       ├── sc450ai_CRK4F4209_styleTstP1.json   # IQ 文件(aibnr.en=1，P1 风格)
+│       ├── sc450ai_CRK4F4209_styleTstP2.json   # IQ 文件(aibnr.en=1，P2 风格)
+│       └── sc450ai/bnr/combo_x1_G8/
+│           └── iso*.bin                        # AIBNR 模型 blob (iso50~iso204800)
+├── CMakeLists.txt
+├── build.sh
+└── README.md
 ```
 
-## 3. 图式配置说明
+## 3. AIISP 依赖说明
 
-通过 `CamPipeCfg_t` 的三张配置表描述完整媒体图：
+| 文件 | 板子路径 | 说明 |
+|------|---------|------|
+| `sc450ai_CRK4F4209_styleTstP0.json` | `/etc/iqfiles/sc450ai_default_default.json`（软链） | aibnr.en=1，rkaiq 按 sensor module 名自动加载 |
+| `iso*.bin` | `/etc/iqfiles/sc450ai/bnr/combo_x1_G8/` | rkaiq readModel 时按 ISO 档位加载 |
 
-```text
-CamPipeCfg_t
-|
-+-- cameras[]   -> 每路 camera 的 ISP / VI / VPSS 配置
-+-- outputs[]   -> 每路编码输出及编码参数
-+-- binds[]     -> 模块间绑定关系 (VI->VPSS, VPSS->VENC, VI->VENC)
+> **注意**：`sc450ai_default_default.json` 是软链，指向上述三份 json 之一（默认 P0）。
+> 板子上原有的 `common/` 版本 aibnr.en=0，不会激活 AIISP。
+
+## 4. 编译与部署
+
+```bash
+# 仅编译（需配置好交叉编译环境 SYSROOT）
+./build.sh
+
+# 编译 + 部署可执行文件到板子
+./build.sh cpres
+
+# cpres 额外执行：
+#   1. 部署三份 ainr IQ json 到 $SYSROOT/etc/iqfiles/
+#   2. 创建软链 sc450ai_default_default.json -> sc450ai_CRK4F4209_styleTstP0.json
+#   3. 部署模型 blob 到 $SYSROOT/etc/iqfiles/sc450ai/bnr/combo_x1_G8/
+
+# 清理编译产物
+./build.sh clear
 ```
 
-## 4. 默认拓扑
+## 5. 参数说明
 
-### 双目四路（主+子码流 × 2）
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `-w` | 主码流宽度（须等于 sensor 输出宽度） | `2688` |
+| `-h` | 主码流高度 | `1520` |
+| `-W` | 子码流宽度 | `640` |
+| `-H` | 子码流高度 | `360` |
+| `-a` | AIQ iqfiles 路径 | `/etc/iqfiles/` |
+| `-e` | 编码格式：`h264cbr` \| `h265cbr` | `h265cbr` |
+| `-b` | 主码流编码码率 kbps | `4096` |
+| `-B` | 子码流编码码率 kbps | `512` |
+| `-l` | 循环帧数，`-1` 无限 | `-1` |
 
-```text
-cam0_main -> route0 -> VENC0 -> rtsp://<board-ip>:554/live/cam0_main
-cam0_sub  -> route1 -> VENC1 -> rtsp://<board-ip>:555/live/cam0_sub
-cam1_main -> route2 -> VENC2 -> rtsp://<board-ip>:556/live/cam1_main
-cam1_sub  -> route3 -> VENC3 -> rtsp://<board-ip>:557/live/cam1_sub
-```
-
-## 5. 常用参数
-
-| 参数 | 说明 |
-|------|------|
-| `-a` | AIQ `iqfiles` 路径 |
-| `-I` | cam0 sensor id |
-| `-J` | cam1 sensor id |
-| `-n` | camera 数量，`1` 或 `2` |
-| `-f` | 帧率 |
-| `-m` | AI-ISP 模型目录或文件路径 |
-| `-p` | RTSP 起始端口 |
-| `--bind_mode` | `vpss`（推荐）或 `direct` |
-| `--enable_sub_stream` | `0` 或 `1` |
-| `--cam0_width` / `--cam0_height` | cam0 主码流尺寸 |
-| `--cam0_sub_width` / `--cam0_sub_height` | cam0 子码流尺寸 |
-| `--cam1_width` / `--cam1_height` | cam1 主码流尺寸 |
-| `--cam1_sub_width` / `--cam1_sub_height` | cam1 子码流尺寸 |
+> **注意**：子码流通过 VPSS chn1 硬件缩放实现，分辨率会直接影响系统负载。
 
 ## 6. 运行示例
 
-### 6.1 单目主+子码流（AI-ISP）
+```bash
+cd /userdata/Solu/aiisp
+
+# 默认参数运行（sc450ai 2688x1520 H.265，子码流 640x360）
+./aiisp -a /etc/iqfiles/ &
+
+# 自定义主码流和子码流参数
+./aiisp -a /etc/iqfiles/ -w 1920 -h 1080 -b 2048 -W 640 -H 360 -B 384
+```
+
+## 7. RTSP 预览
 
 ```bash
-./aiisp -n 1 -I 0 -a /etc/iqfiles -m /oem/usr/lib/ --bind_mode vpss --enable_sub_stream 1
+# VLC 打开主码流
+vlc rtsp://<board-ip>:554/live/0
+
+# VLC 打开子码流
+vlc rtsp://<board-ip>:554/live/1
 ```
 
-输出：
+## 8. 验证 AIISP 是否激活
 
-```text
-rtsp://<board-ip>:554/live/cam0_main
-rtsp://<board-ip>:555/live/cam0_sub
+AIBNR 受 ISO 阈值（`autoSwOn_thred = isoIdx3`）控制，**只在暗光/高 ISO 下激活**。
+
+验证方法：遮住镜头或放暗光环境，观察程序输出：
+
+```
+# rkaiq 日志出现以下内容说明已激活：
+AIBNR:K:switch to aiisp mode, iso 528
+AIBNR:K:AibnrManager_notify_sof: switch aiisp complete, doAiisp_en 1
+CAMHW:K:aiisp mode is 1 wr_linecnt is 1520 rd_linecnt is 1520
+
+# monitor 线程 frame_id 持续递增（AIBNR 以 10fps 推理）：
+[monitor #43] run_idx=1 frame_id=950 frm_rate=102 algo=0(AIBNR) hw_state=1 => AIISP 正在推理 ✓
 ```
 
-### 6.2 双目四路（AI-ISP）
-
-```bash
-./aiisp -n 2 -I 0 -J 1 -a /etc/iqfiles -m /oem/usr/lib/ --bind_mode vpss --enable_sub_stream 1
-```
-
-输出：
-
-```text
-rtsp://<board-ip>:554/live/cam0_main
-rtsp://<board-ip>:555/live/cam0_sub
-rtsp://<board-ip>:556/live/cam1_main
-rtsp://<board-ip>:557/live/cam1_sub
-```
-
-### 6.3 双目直绑（无 AI-ISP）
-
-```bash
-./aiisp -n 2 -I 0 -J 1 -a /etc/iqfiles --bind_mode direct
-```
-
-输出：
-
-```text
-rtsp://<board-ip>:554/live/cam0_main
-rtsp://<board-ip>:555/live/cam1_main
-```
-
-## 7. 关键结构
-
-### 7.1 `CamPipeCameraCfg_t`
-
-一路 camera 的输入链路，包含：
-
-- `isp_cfg` — ISP 配置
-- `vi_cfg` — VI 配置
-- `enable_vpss` — 是否启用 VPSS（AI-ISP 必须为 true）
-- `vpss_cfg` — VPSS 配置，包括 `enable_aiisp`、`aiisp_model_path`、`aiisp_buf_cnt` 等
-
-### 7.2 `CamPipeOutputCfg_t`
-
-一路编码输出：
-
-- `route_id` — RTSP 路由 ID
-- `venc_cfg` — VENC 编码参数
-
-### 7.3 `CamPipeBindCfg_t`
-
-一条模块绑定关系（举例）：
-
-```text
-VI -> VPSS     (VI chn 绑到 VPSS grp)
-VPSS -> VENC   (VPSS chn 绑到 VENC)
-VI -> VENC     (直绑模式)
-```
-
-## 8. 扩展建议
-
-多目 / 第三码流：
-
-- 增加 `camera_count`
-- 在 `vpss_cfg.channels[]` 增加新的 chn 用于第三码流
-- 对应增加 `outputs[]` 和 `binds[]`
-- 分配新的 RTSP 端口
-
-## 9. 相关文件
-
-| 文件 | 说明 |
-|------|------|
-| `src/rkadk_aiisp_test.c` | 入口，参数解析与图配置构建 |
-| `src/aiisp_runner.c` | 运行调度，队列管理，RTSP 推流 |
-| `../../easyeai-api/media/rockit_adapter/camera/pipeline.h` | 管线接口定义 |
-| `../../easyeai-api/media/rockit_adapter/camera/pipeline.c` | 管线实现 |
-| `../../easyeai-api/media/rockit_adapter/platform/rockchip_cam.h` | RV1126B 底层类型定义与接口 |
-| `../../easyeai-api/media/rockit_adapter/platform/rockchip_cam.c` | RV1126B 底层实现 |
+强光下 ISO 低，AIBNR 不工作，frame_id 不变属正常。

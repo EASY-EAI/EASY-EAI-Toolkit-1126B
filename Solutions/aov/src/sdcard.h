@@ -38,6 +38,12 @@ int MountSdcardLight(void);
  */
 int UmountSdcardLight(void);
 
+/**
+ * @brief 检查 SD 卡是否已挂载到 /mnt/sdcard
+ * @return 已挂载返回 0，未挂载返回 -1
+ */
+int IsSdcardMounted(void);
+
 #ifdef __cplusplus
 }
 #endif

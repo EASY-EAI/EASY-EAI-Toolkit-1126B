@@ -250,7 +250,7 @@ static int check_sdcard_mount(void)
     while ((bytesRead = read(fd, &line[pos], 1)) > 0) {
         if (line[pos] == '\n') {
             line[pos] = '\0';
-            if (strstr(line, SDCARD_MOUNT_PATH)) {
+            if (strstr(line, SDCARD_MOUNT_PATH) && !strstr(line, "autofs")) {
                 printf("[SDCARD] Found '%s' in line: %s\n", SDCARD_MOUNT_PATH, line);
                 ret = 0;
                 break;
@@ -270,8 +270,9 @@ static int check_sdcard_mount(void)
 /* ======================== 轻量版挂载/卸载（跳过 unbind/bind，AOV 休眠优化） ======================== */
 
 /*
- * 轻量卸载：仅 umount，跳过驱动解绑（unbind）。
- * 系统 suspend 通过 MNT_DETACH 延迟卸载，内核在 freeze 时自动处理块设备。
+ * 轻量卸载：同步 umount，跳过驱动解绑（unbind）。
+ * 同步 umount 确保 dirty page cache 落盘后再释放挂载点，
+ * 避免唤醒后 mount 时遇到 EBUSY 或 FAT 元数据损坏。
  * 节省 unbind_sdcard() 中 netlink 5s 超时等待。
  */
 int UmountSdcardLight(void)
@@ -285,7 +286,12 @@ int UmountSdcardLight(void)
         return 0;
     }
 
-    ret = umount2(SDCARD_MOUNT_PATH, MNT_DETACH);
+    /*
+     * 使用同步 umount（不带 MNT_DETACH）确保所有 dirty page cache 数据
+     * 在返回前落盘。MNT_DETACH 仅从命名空间分离但不刷 dirty pages，
+     * 导致块设备在下次唤醒 mount 时仍被占用（EBUSY），且 FAT 元数据可能丢失。
+     */
+    ret = umount2(SDCARD_MOUNT_PATH, 0);
     if (ret == 0)
         printf("[SDCARD] light unmount success\n");
     else
@@ -296,13 +302,17 @@ int UmountSdcardLight(void)
 }
 
 /*
- * 轻量挂载：仅 mount，跳过驱动绑定（bind）。
- * 唤醒时 dwmmc 驱动仍在绑定状态，mmc 块设备依然可用。
- * 直接 mount 分区即可，节省 bind_sdcard() 中 netlink 5s 超时等待。
+ * 轻量挂载：优先尝试仅 mount，若块设备消失则回退到完整 bind+mount。
+ *
+ * "mem" 深度休眠唤醒后，MMC 块设备可能未自动重建（mmc driver 重枚举失败），
+ * 此时 access("/dev/mmcblk1p1") 返回 -1，直接 mount 会失败。
+ * 需要先 bind_sdcard() 重新绑定 MMC 驱动，等待块设备出现后再 mount。
+ *
+ * 返回 0 表示挂载成功，-1 表示彻底失败。
  */
 int MountSdcardLight(void)
 {
-    int ret = 0;
+    int ret = -1;
 
     printf("[SDCARD] Enter light mount\n");
 
@@ -311,33 +321,86 @@ int MountSdcardLight(void)
         return 0;
     }
 
+    /*
+     * 阶段1：尝试轻量 mount（块设备可能仍在）
+     */
     if (access(MOUNT_DEV_1, F_OK) == 0) {
         ret = mount(MOUNT_DEV_1, SDCARD_MOUNT_PATH, "vfat", 0, NULL);
-        if (ret != 0)
-            printf("[SDCARD] light mount failed, errno = %s\n", strerror(errno));
-        else
-            printf("[SDCARD] light mount success\n");
+        if (ret == 0) {
+            printf("[SDCARD] light mount success (dev1)\n");
+            goto check_and_exit;
+        }
+        printf("[SDCARD] light mount dev1 failed, errno = %s\n", strerror(errno));
     } else if (access(MOUNT_DEV_2, F_OK) == 0) {
         ret = mount(MOUNT_DEV_2, SDCARD_MOUNT_PATH, "vfat", 0, NULL);
-        if (ret != 0)
-            printf("[SDCARD] light mount failed, errno = %s\n", strerror(errno));
-        else
-            printf("[SDCARD] light mount success\n");
+        if (ret == 0) {
+            printf("[SDCARD] light mount success (dev2)\n");
+            goto check_and_exit;
+        }
+        printf("[SDCARD] light mount dev2 failed, errno = %s\n", strerror(errno));
     } else {
-        printf("[SDCARD] bad mount path!\n");
-        ret = -1;
+        printf("[SDCARD] bad mount path, block device missing after mem sleep\n");
     }
 
+    /*
+     * 阶段2：轻量 mount 失败 → 回退到完整 bind + mount
+     * 先 bind MMC 驱动，等待块设备重新出现，再 mount 分区。
+     */
+    printf("[SDCARD] light mount failed, falling back to full bind+mount...\n");
+
+    /*
+     * 注意：这里不能直接调 MountSdcard()，因为它内部会先 check_sdcard_mount()，
+     * 发现已挂载就返回，不会执行 bind。我们手动执行 bind_sdcard() 和 mount。
+     */
+    bind_sdcard();
+
+    /* bind 后等待块设备出现（最多 2s） */
+    for (int wait = 0; wait < 20; wait++) {
+        if (access(MOUNT_DEV_1, F_OK) == 0) {
+            ret = mount(MOUNT_DEV_1, SDCARD_MOUNT_PATH, "vfat", 0, NULL);
+            if (ret == 0) {
+                printf("[SDCARD] full remount success (dev1)\n");
+                goto check_and_exit;
+            }
+            printf("[SDCARD] full remount dev1 failed, errno = %s\n", strerror(errno));
+            break;
+        }
+        if (access(MOUNT_DEV_2, F_OK) == 0) {
+            ret = mount(MOUNT_DEV_2, SDCARD_MOUNT_PATH, "vfat", 0, NULL);
+            if (ret == 0) {
+                printf("[SDCARD] full remount success (dev2)\n");
+                goto check_and_exit;
+            }
+            printf("[SDCARD] full remount dev2 failed, errno = %s\n", strerror(errno));
+            break;
+        }
+        usleep(100000); /* 100ms */
+    }
+
+    if (ret != 0) {
+        printf("[SDCARD] full remount also failed after bind attempt\n");
+        /* unbind 回滚，避免干扰下次尝试 */
+        if (device_driver_is_bound(SDCARD_DEVICE, SDCARD_DRIVER)) {
+            device_detach_driver(SDCARD_DEVICE, SDCARD_DRIVER);
+        }
+    }
+
+check_and_exit:
     if (ret == 0 && check_sdcard_mount() != 0) {
         printf("[SDCARD] Not found mount sdcard on %s\n", SDCARD_MOUNT_PATH);
         ret = -1;
     }
 
-    printf("[SDCARD] Exit light mount\n");
+    printf("[SDCARD] Exit light mount (%s)\n", ret == 0 ? "OK" : "FAIL");
     return ret;
 }
 
 /* ======================== 公开接口 ======================== */
+
+int IsSdcardMounted(void)
+{
+    return check_sdcard_mount();
+}
 
 int MountSdcard(void)
 {

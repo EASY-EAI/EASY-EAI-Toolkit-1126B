@@ -7,9 +7,9 @@ set(OpenCV_INCLUDE_DIRS
     ${CMAKE_SYSROOT}/usr/include/opencv4/ 
 )
 set(OpenCV_LIBS_DIRS
-    ${CAMKE_SYSROOT}/usr/lib/aarch64-linux-gnu/lapack
-    ${CAMKE_SYSROOT}/usr/lib/aarch64-linux-gnu/blas
-    ${CAMKE_SYSROOT}/usr/lib/aarch64-linux-gnu/
+    ${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu/lapack
+    ${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu/blas
+    ${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu/
 )
 set(OpenCV_LIBS
     opencv_core 
@@ -35,7 +35,7 @@ file(GLOB SPEECH_RECOGNITION_SOURCE_DIRS
 
 # static Library paths
 set(SPEECH_RECOGNITION_LIBS_DIRS
-    ${CAMKE_SYSROOT}/usr/lib/aarch64-linux-gnu/
+    ${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu/
     ${CMAKE_CURRENT_LIST_DIR}
     ${OpenCV_LIBS_DIRS}
     )
@@ -56,6 +56,6 @@ set(SPEECH_RECOGNITION_LIBS
     ${OpenCV_LIBS} 
     pthread
     stdc++
-    /mnt/usr/lib/aarch64-linux-gnu/libfftw3f.so.3
-    /mnt/usr/lib/aarch64-linux-gnu/libsndfile.so.1
+    ${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu/libfftw3f.so.3
+    ${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu/libsndfile.so.1
     )

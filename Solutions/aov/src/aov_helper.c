@@ -218,6 +218,72 @@ int Aov_EnableNonBootCPUs(void)
     return 0;
 }
 
+/* ======================== USB 设备级 unbind 辅助 ======================== */
+
+/*
+ * 在 xhci 控制器解绑前，先移除已知有问题的 USB 设备。
+ *
+ * 某些 USB 设备（如 WiFi/BT 模块 ws73）在 xhci 被 unbound/re-bound 后，
+ * 其设备状态会变得不一致。当 USB core 在后续 resume 中尝试重新枚举该设备时，
+ * 会因设备描述符读取失败而触发 3 次超时重试，每次 ~5-10s，总计延迟约 27s。
+ *
+ * 内核日志表现：
+ *   usb 3-1.2: device descriptor read/64, error -71      (EPROTO)
+ *   usb 3-1.2: device descriptor read/64, error -110     (ETIMEDOUT × 2)
+ *
+ * 通过在 xhci 解绑前先将设备从 USB core 移除（unbind），
+ * 令 resume 时 USB core 不持有该设备的陈旧引用，从而跳过耗时重枚举。
+ * xhci re-bind 后，USB core 会以 clean state 重新发现设备。
+ */
+static void unbind_usb_devices_on_bus(void)
+{
+    /*
+     * 需要从 USB core 驱动移除的设备 ID。
+     * 可通过 lsusb -t 或 readlink /sys/bus/usb/devices/{设备ID}/driver 来确认。
+     * 如果挂载了 USB 存储(U盘)，也需要在此列出。
+     */
+    static const char *devices[] = {
+        "3-1",     /* USB 总线 3, 端口 1 (根 hub 端口) — 先移除以阻止子设备枚举 */
+        "3-1.2",   /* USB 总线 3, 端口 1, 子端口 2 (WiFi/BT ws73 模块) */
+        NULL
+    };
+
+    for (int i = 0; devices[i]; i++) {
+        char devpath[64];
+        char linkpath[256];
+        ssize_t len;
+        int fd;
+
+        /* 检查设备是否存在 */
+        snprintf(devpath, sizeof(devpath), "/sys/bus/usb/devices/%s", devices[i]);
+        if (access(devpath, F_OK) != 0)
+            continue;
+
+        /* 检查 driver 链接是否存在（已绑定驱动） */
+        snprintf(linkpath, sizeof(linkpath), "%s/driver", devpath);
+        len = readlink(linkpath, devpath, sizeof(devpath) - 1);
+        if (len < 0 || len >= (ssize_t)sizeof(devpath) - 1)
+            continue;
+        devpath[len] = '\0';
+
+        /* 从驱动 unbind */
+        snprintf(linkpath, sizeof(linkpath), "/sys/bus/usb/drivers/%s/unbind",
+                 strrchr(devpath, '/') ? strrchr(devpath, '/') + 1 : devpath);
+
+        fd = open(linkpath, O_WRONLY | O_NONBLOCK);
+        if (fd < 0) {
+            printf("[AOV] USB: can't open %s for unbind, errno=%d\n",
+                   linkpath, errno);
+            continue;
+        }
+        write(fd, devices[i], strlen(devices[i]));
+        close(fd);
+
+        printf("[AOV] USB: unbound %s from %s\n", devices[i],
+               strrchr(devpath, '/') ? strrchr(devpath, '/') + 1 : devpath);
+    }
+}
+
 /* ======================== USB xhci 控制器（休眠前解绑/唤醒后重绑） ======================== */
 
 /*
@@ -237,6 +303,16 @@ int Aov_DisableUSB(void)
     int fd;
     ssize_t ret;
 
+    /*
+     * 第1步：在 xhci 解绑前，先移除已知有问题的 USB 设备
+     * （如 WiFi/BT ws73 模块），避免 resume 时 USB core
+     * 因陈旧引用而耗时重枚举该设备。
+     */
+    unbind_usb_devices_on_bus();
+
+    /*
+     * 第2步：解绑 xhci-hcd 平台驱动
+     */
     snprintf(path, sizeof(path), "%s/unbind", XHCI_DRIVER_PATH);
     fd = open(path, O_WRONLY | O_NONBLOCK);
     if (fd < 0) {

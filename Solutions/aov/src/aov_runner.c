@@ -28,6 +28,7 @@
 #include "sdcard.h"
 #include "data_queue.h"
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -174,7 +175,8 @@ static void make_file_path(const char *dir, const char *prefix, bool use_h265,
 static void record_loop(DataQueueHandle queue, FILE **fd_ptr, const char *rec_dir,
                         const char *rec_prefix, bool use_h265, int fps,
                         int duration_sec, volatile bool *running,
-                        uint64_t *current_file_start_pts)
+                        uint64_t *current_file_start_pts,
+                        char *current_file_path, size_t path_max)
 {
     time_t deadline = time(NULL) + duration_sec;
     int frame_count = 0;
@@ -229,6 +231,8 @@ static void record_loop(DataQueueHandle queue, FILE **fd_ptr, const char *rec_di
                     if (*fd_ptr) {
                         *current_file_start_pts = meta.timestamp;
                         file_count++;
+                        if (current_file_path && path_max > 0)
+                            snprintf(current_file_path, path_max, "%s", file_path);
                         printf("[AOV_RUNNER] >>>> new file #%d: %s <<<<\n", file_count, file_path);
                     } else {
                         printf("[AOV_RUNNER] fopen failed: %s\n", file_path);
@@ -274,6 +278,7 @@ int AovRunner_Run(const AovRunnerCfg_t *cfg, volatile bool *running)
     CamPipeHandle pipe = NULL;
     DataQueueHandle queue = NULL;
     FILE *fd = NULL;
+    char current_file_path[256] = {0};  /* 跨 loop 追踪当前文件路径，用于唤醒后追加写入 */
     uint64_t current_file_start_pts = 0;
     int ret = -1;
     int loop_idx = 0;
@@ -328,7 +333,8 @@ int AovRunner_Run(const AovRunnerCfg_t *cfg, volatile bool *running)
                loop_idx + 1, cfg->loop_duration_sec, cfg->loop_count);
 
         record_loop(queue, &fd, cfg->rec_dir, cfg->rec_prefix, cfg->use_h265,
-                    cfg->fps, cfg->loop_duration_sec, running, &current_file_start_pts);
+                    cfg->fps, cfg->loop_duration_sec, running, &current_file_start_pts,
+                    current_file_path, sizeof(current_file_path));
 
         printf("[AOV_RUNNER] <<<<<< loop %d END: record_loop returned\n", loop_idx + 1);
 
@@ -345,9 +351,16 @@ int AovRunner_Run(const AovRunnerCfg_t *cfg, volatile bool *running)
         
         if (cfg->enable_aov && !is_last_loop) {
             /*
-             * 注意：不再关闭 fd，让文件跨 loop 持续写入。
-             * 分片完全由 record_loop 内的 RAW_SPLIT_SEC 宏控制。
+             * 同步 umount 要求没有打开的 fd。
+             * fsync + fclose 确保数据落盘并释放文件，允许 UmountSdcardLight
+             * 以同步方式卸载。唤醒后以追加模式重新打开同一文件，跨 loop 写入。
              */
+            if (fd) {
+                fflush(fd);
+                fsync(fileno(fd));
+                fclose(fd);
+                fd = NULL;
+            }
 
             /*
              * 使用 CamPipe_Suspend 轻量暂停管线。
@@ -416,7 +429,35 @@ int AovRunner_Run(const AovRunnerCfg_t *cfg, volatile bool *running)
                 }
 
                 /* ★ 优化4：轻量挂载 SD 卡，跳过驱动绑定，节省 ~100ms */
-                MountSdcardLight();
+                int mount_ret = MountSdcardLight();
+                if (mount_ret != 0) {
+                    /*
+                     * ★ 关键修复：SD 卡挂载失败时，无法安全写入录像文件。
+                     *
+                     * 日志中表现为 MountSdcardLight 输出 "bad mount path!" / "light mount failed"，
+                     * 但管线继续运行，fopen/fwrite 落入无 backing store 的 page cache，
+                     * 录像数据永久丢失。
+                     *
+                     * 处理策略：走回退分支，执行完整 MountSdcard(bind+mount)。
+                     * 若完整挂载也失败，标记失败让主循环退出。
+                     */
+                    printf("[AOV_RUNNER] MountSdcardLight failed (%d), falling back to full mount...\n", mount_ret);
+                    MountSdcard();
+
+                    if (IsSdcardMounted() != 0) {
+                        printf("[AOV_RUNNER] CRITICAL: SD card mount FAILED after full remount, cannot record!\n");
+                        *running = false;
+                        break;
+                    }
+                }
+
+                /* 追加打开上一轮写入的文件，跨 loop 写入同一文件 */
+                if (current_file_path[0] != '\0') {
+                    fd = fopen(current_file_path, "ab");
+                    if (!fd)
+                        printf("[AOV_RUNNER] reopen %s failed: %s\n",
+                               current_file_path, strerror(errno));
+                }
 
                 if (pipe) {
                     /*

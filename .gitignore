@@ -24,9 +24,11 @@ UiSolutions/*/Release
 UiSolutions/*/Debug
 UiSolutions/*/*.user
 UiSolutions/*/Makefile
-
+deb_package
 logCfg
 
 #easyeai-api
+
+docs/
 
 

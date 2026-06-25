@@ -28,49 +28,31 @@ endif()
 
 
 # ======================== easyeai_api =========================
-# 设置 EasyEAI 框架各模块的根目录路径
 set(toolkit_root ${CMAKE_CURRENT_SOURCE_DIR}/../../easyeai-api)
-set(algorithm_root ${toolkit_root}/algorithm)
 set(common_root       ${toolkit_root}/common)
 set(media_root        ${toolkit_root}/media)
-set(netProtocol_root  ${toolkit_root}/netProtocol)
 
-# 包含各模块的 API 配置文件，这些文件定义了头文件路径、源文件路径和库文件
-include (${common_root}/system_opt/api.cmake)      # 系统基础功能模块
-include (${common_root}/data_queue/api.cmake)      # 数据队列模块
-include (${netProtocol_root}/rtsp/api.cmake) # RTSP 服务模块
-include (${media_root}/rockit_adapter/api.cmake)   # Rockchip 媒体适配器模块
+include (${common_root}/system_opt/api.cmake)
+include (${media_root}/rockit_adapter/api.cmake)
 
-# 定义项目所需的头文件包含路径列表
-set(api_inc 
-    ${SYSOPT_INCLUDE_DIRS}              # 系统基础功能模块头文件路径
-    ${DQUEUE_INCLUDE_DIRS}              # 数据队列模块头文件路径
-    ${CAMERA_ADAPTER_INCLUDE_DIRS}      # 摄像头适配器模块头文件路径
-    ${RTSP_SERVER_INCLUDE_DIRS}         # RTSP 服务模块头文件路径
+set(api_inc
+    ${SYSOPT_INCLUDE_DIRS}
+    ${CAMERA_ADAPTER_INCLUDE_DIRS}
     )
 
-# 定义项目所需的源文件路径列表
-file(GLOB api_srcs 
-    ${SYSOPT_SOURCE_DIRS}               # 系统基础功能模块源文件
-    ${DQUEUE_SOURCE_DIRS}               # 数据队列模块源文件
-    ${CAMERA_ADAPTER_SOURCE_DIRS}       # 摄像头适配器模块源文件
-    ${RTSP_SERVER_SOURCE_DIRS}          # RTSP 服务模块源文件
+file(GLOB api_srcs
+    ${SYSOPT_SOURCE_DIRS}
+    ${CAMERA_ADAPTER_SOURCE_DIRS}
     )
 
-# 定义库文件搜索路径
-link_directories( 
-    )
-
-# 定义项目依赖的系统库列表
-set(sysLib_list 
-    ${SYSOPT_LIBS}                      # 系统基础功能模块依赖库
-    ${DQUEUE_LIBS}                      # 数据队列模块依赖库
-    ${CAMERA_ADAPTER_LIBS}              # 摄像头适配器模块依赖库
-    ${RTSP_SERVER_LIBS}                 # RTSP 服务模块依赖库
+set(sysLib_list
+    ${SYSOPT_LIBS}
+    ${CAMERA_ADAPTER_LIBS}
     )
 # ======================== easyeai_api =========================
 
 # ========================== custom ============================
+
 if(USE_RKAIQ)
     include_directories(
             ${CMAKE_SYSROOT}/usr/include/rkaiq/
@@ -87,11 +69,12 @@ set(custom_inc
 )
 # -L
 link_directories(
-   #${PROJECT_SOURCE_DIR}/libs 
+    ${CMAKE_SYSROOT}/usr/lib
 )
 # -l
 set(custom_libs
     rga
+    rtsp
 )
 # source code
 aux_source_directory(./src dir_srcs)

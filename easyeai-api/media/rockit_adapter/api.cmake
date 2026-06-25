@@ -1,60 +1,46 @@
-# ============================================================
-# Platform 核心（底层硬件适配）
-#   按子系统分目录，方便按需编译
-# ============================================================
-file(GLOB PLATFORM_SYS_SOURCE_DIRS
-    ${CMAKE_CURRENT_LIST_DIR}/platform/sys/*.c
-    )
-file(GLOB PLATFORM_CAM_SOURCE_DIRS
-    ${CMAKE_CURRENT_LIST_DIR}/platform/cam/*.c
-    )
-file(GLOB PLATFORM_AUDIO_SOURCE_DIRS
-    ${CMAKE_CURRENT_LIST_DIR}/platform/audio/*.c
+# source code path (common)
+file(GLOB RKIT_ADAPTER_COMMON_SOURCE_DIRS
+    ${CMAKE_CURRENT_LIST_DIR}/common/*.c
+    ${CMAKE_CURRENT_LIST_DIR}/common/*.cpp
     )
 
-# ============================================================
-# Camera 管线 (ISP→VI→VPSS/VENC)
-# ============================================================
-set(CAMERA_PIPELINE_SOURCE_DIRS
-    ${CMAKE_CURRENT_LIST_DIR}/camera/pipeline.c
+# source code path (isp3.9)
+file(GLOB RKIT_ADAPTER_ISP_SOURCE_DIRS
+    ${CMAKE_CURRENT_LIST_DIR}/isp3.9/*.c
+    ${CMAKE_CURRENT_LIST_DIR}/isp3.9/*.cpp
     )
 
-# ============================================================
-# Audio 管线 (AI→AENC)
-# ============================================================
-set(AUDIO_PIPELINE_SOURCE_DIRS
-    ${CMAKE_CURRENT_LIST_DIR}/audio/pipeline.c
+set(SDK_INCLUDE_DIR $ENV{SYSROOT}/usr/include)
+
+# headfile path
+set(RKIT_ADAPTER_INCLUDE_DIRS
+    ${CMAKE_CURRENT_LIST_DIR}/common
+    ${CMAKE_CURRENT_LIST_DIR}/isp3.9
+    ${SDK_INCLUDE_DIR}
+    ${SDK_INCLUDE_DIR}/rkaiq
+    ${SDK_INCLUDE_DIR}/rkaiq/uAPI2
     )
 
-# ============================================================
-# 向后兼容：完整合并
-# ============================================================
-set(CAMERA_ADAPTER_SOURCE_DIRS
-    ${PLATFORM_SYS_SOURCE_DIRS}
-    ${PLATFORM_CAM_SOURCE_DIRS}
-    ${PLATFORM_AUDIO_SOURCE_DIRS}
-    ${CAMERA_PIPELINE_SOURCE_DIRS}
-    ${AUDIO_PIPELINE_SOURCE_DIRS}
+# static library search path
+set(RKIT_ADAPTER_LIBS_DIRS
+    ${CMAKE_CURRENT_LIST_DIR}/libs
     )
 
-# ============================================================
-# 头文件路径
-# ============================================================
-set(CAMERA_ADAPTER_INCLUDE_DIRS
-    ${CMAKE_CURRENT_LIST_DIR}
-    ${CMAKE_CURRENT_LIST_DIR}/camera
-    ${CMAKE_CURRENT_LIST_DIR}/audio
-    ${CMAKE_CURRENT_LIST_DIR}/platform/cam
-    ${CMAKE_CURRENT_LIST_DIR}/platform/audio
-    ${CMAKE_CURRENT_LIST_DIR}/platform/sys
-    ${CMAKE_SYSROOT}/usr/include/rockchip
-    )
-
-# ============================================================
-# 链接库
-# ============================================================
-set(CAMERA_ADAPTER_LIBS
+# link libraries
+set(RKIT_ADAPTER_LIBS
     rockit
     rkaiq
+    )
+
+# 向后兼容：Solutions/ 下各子工程引用这些变量名
+set(CAMERA_ADAPTER_SOURCE_DIRS
+    ${RKIT_ADAPTER_COMMON_SOURCE_DIRS}
+    ${RKIT_ADAPTER_ISP_SOURCE_DIRS}
+    )
+set(CAMERA_ADAPTER_INCLUDE_DIRS
+    ${RKIT_ADAPTER_INCLUDE_DIRS}
+    )
+set(CAMERA_ADAPTER_LIBS
+    ${RKIT_ADAPTER_LIBS}
     pthread
     )
