@@ -22,6 +22,19 @@
 
 重要更新：
 ---
+> 2026-07-13 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.2.0
+> * 更新 easyeai-api
+>     * 多媒体组件api
+>         * [新增] aov
+>         * [新增] lmo_adapter
+>         * [移除] rockit_adapter
+>         * [移除] sdcard_recorder
+> * 更新【开发实例】
+>     * [更新] aov
+>     * [更新] avs
+>     * [更新] aiisp(黑光)
+>
 > 2026-05-26 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.1.2
 > * 更新 easyeai-api

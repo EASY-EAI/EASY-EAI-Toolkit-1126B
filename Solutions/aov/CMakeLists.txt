@@ -39,27 +39,35 @@ set(media_root     ${toolkit_root}/media)
 # 包含各模块的 API 配置文件，这些文件定义了头文件路径、源文件路径和库文件
 include (${common_root}/system_opt/api.cmake)      # 系统基础功能模块
 include (${common_root}/data_queue/api.cmake)      # 数据队列模块
-include (${media_root}/rockit_adapter/api.cmake)    # Rockchip 媒体适配器模块
+include (${media_root}/lmo_adapter/api.cmake)    # LMO 媒体适配器模块
 
 ## api头文件路径
-set(api_inc 
+set(AOV_ADAPTER_DIR ${media_root}/lmo_adapter/aov)
+set(api_inc
+    ${AOV_ADAPTER_DIR}              # AOV 专用通用接口（需在 common/ 前面）
     ${SYSOPT_INCLUDE_DIRS}          # 系统基础功能模块头文件路径
     ${DQUEUE_INCLUDE_DIRS}          # 数据队列模块头文件路径
+    ${LOGMANAGER_INCLUDE_DIRS}      # 日志管理模块头文件路径
     ${CAMERA_ADAPTER_INCLUDE_DIRS}  # 摄像头适配器模块头文件路径
     )
 ## api源文件路径
-file(GLOB api_srcs 
+file(GLOB api_srcs
     ${SYSOPT_SOURCE_DIRS}           # 系统基础功能模块源文件
     ${DQUEUE_SOURCE_DIRS}           # 数据队列模块源文件
     ${CAMERA_ADAPTER_SOURCE_DIRS}   # 摄像头适配器模块源文件
+    ${AOV_ADAPTER_DIR}/sample_comm.c        # AOV 专用 common 接口
+    # sample_comm_muxer.c removed — raw stream output no longer needs rkmuxer
     )
+# 排除 common/sample_comm.c（AOV 用 aov/ 版本替代）
+list(FILTER api_srcs EXCLUDE REGEX "common/sample_comm\\.c$")
 ## api静态库文件路径
-link_directories( 
+link_directories(
     )
 ## api所依赖的库参数
-set(sysLib_list 
+set(sysLib_list
     ${SYSOPT_LIBS}                  # 系统基础功能模块依赖库
     ${DQUEUE_LIBS}                  # 数据队列模块依赖库
+    ${LOGMANAGER_LIBS}              # 日志管理模块依赖库
     ${CAMERA_ADAPTER_LIBS}          # 摄像头适配器模块依赖库
     )
 # ======================== easyeai_api =========================
@@ -105,39 +113,44 @@ endif()
 #pkg_search_module(GST1.0 REQUIRED gstreamer-1.0)
 #pkg_check_modules(GST1.0_VIDEO REQUIRED gstreamer-video-1.0)
 
+# aov api 根目录（common/core/isp/power/platform/record/muxer/osd/media 已迁移至此）
+set(aov_api_root ${CMAKE_CURRENT_SOURCE_DIR}/../../easyeai-api/media/aov)
+include(${aov_api_root}/api.cmake)
+
 # -I
 set(custom_inc
-    ./src
-    #${OpenCV_INCLUDE_DIRS} 
-    #${GTK3_INCLUDE_DIRS} 
-    #${GST1.0_INCLUDE_DIRS} 
-    #${GST1.0_VIDEO_INCLUDE_DIRS} 
-    ${PROJECT_SOURCE_DIR}/include
+    ./src/app
+    ${AOV_INCLUDE_DIRS}
 )
 # -L
 link_directories(
-   #${PROJECT_SOURCE_DIR}/libs 
+   #${PROJECT_SOURCE_DIR}/libs
+   ${CMAKE_SYSROOT}/usr/lib
+   ${common_root}/log_manager
 )
 # -l
 set(custom_libs
-    rga 
-    #${OpenCV_LIBS} 
-    #${GTK3_LIBRARIES} 
-    #${GST1.0_LIBRARIES} 
-    #${GST1.0_VIDEO_LIBRARIES} 
+    rga
+    rtsp
+    #${OpenCV_LIBS}
+    #${GTK3_LIBRARIES}
+    #${GST1.0_LIBRARIES}
+    #${GST1.0_VIDEO_LIBRARIES}
 )
 # source code
-aux_source_directory(./src dir_srcs)
+aux_source_directory(./src     dir_app)
 # ========================== custom ============================
 
 
 #--------------------------
 # execute file
 #--------------------------
-add_executable(${CURRENT_FOLDER} ${dir_srcs} ${api_srcs})   #-o
+add_executable(${CURRENT_FOLDER}
+    ${dir_app}
+    ${api_srcs}
+)   #-o
 target_include_directories(${CURRENT_FOLDER} PRIVATE ${custom_inc} ${api_inc})
-target_link_libraries(${CURRENT_FOLDER} ${custom_libs} ${sysLib_list})
+target_link_libraries(${CURRENT_FOLDER} ${AOV_LIBS} ${custom_libs} ${sysLib_list})
 if(USE_RKAIQ)
 	target_link_libraries(${CURRENT_FOLDER} rkaiq)
 endif()
-

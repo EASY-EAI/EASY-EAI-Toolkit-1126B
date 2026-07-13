@@ -4,6 +4,7 @@ build/
 _build/
 build-output/
 cmake-out/
+lmo_adapter_build/
 
 # Backup files for Emacs
 *~

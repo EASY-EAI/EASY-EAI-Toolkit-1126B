@@ -63,9 +63,9 @@ do_build() {
 
     ## copy to Board
     if [ -n "${SYSROOT}" ]; then
-        mkdir -p "${SYSROOT}/${BOARD_BIN_DIR}"
-        cp -f Release/$BIN_NAME "${SYSROOT}/${BOARD_BIN_DIR}/"
-        cp -f Release/*.ko "${SYSROOT}/${BOARD_BIN_DIR}/"
+        sudo mkdir -p "${SYSROOT}/${BOARD_BIN_DIR}"
+        sudo cp -f Release/$BIN_NAME "${SYSROOT}/${BOARD_BIN_DIR}/"
+        sudo cp -f Release/*.ko "${SYSROOT}/${BOARD_BIN_DIR}/"
         echo "Files deployed to ${SYSROOT}/${BOARD_BIN_DIR}/."
     fi
 }

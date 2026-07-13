@@ -25,27 +25,24 @@ set(media_root     ${toolkit_root}/media)
 set(netprotocol_root ${toolkit_root}/netProtocol)
 
 include (${common_root}/system_opt/api.cmake)
-include (${media_root}/rockit_adapter/api.cmake)
+include (${media_root}/lmo_adapter/api.cmake)
 include (${netprotocol_root}/rtsp/api.cmake)
 
 set(api_inc
     ${SYSOPT_INCLUDE_DIRS}
-    ${RKIT_ADAPTER_INCLUDE_DIRS}
+    ${CAMERA_ADAPTER_INCLUDE_DIRS}
     ${RTSP_SERVER_INCLUDE_DIRS}
     )
 file(GLOB api_srcs
     ${SYSOPT_SOURCE_DIRS}
-    ${RKIT_ADAPTER_COMMON_SOURCE_DIRS}
-    ${RKIT_ADAPTER_ISP_SOURCE_DIRS}
     ${RTSP_SERVER_SOURCE_DIRS}
     )
 link_directories(
-    ${RKIT_ADAPTER_LIBS_DIRS}
     ${CMAKE_SYSROOT}/usr/lib/
 )
 set(sysLib_list
     ${SYSOPT_LIBS}
-    ${RKIT_ADAPTER_LIBS}
+    ${CAMERA_ADAPTER_LIBS}
     ${RTSP_SERVER_LIBS}
     rtsp
     )

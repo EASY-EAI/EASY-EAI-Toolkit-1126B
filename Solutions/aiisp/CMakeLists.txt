@@ -33,7 +33,7 @@ set(common_root       ${toolkit_root}/common)
 set(media_root        ${toolkit_root}/media)
 
 include (${common_root}/system_opt/api.cmake)
-include (${media_root}/rockit_adapter/api.cmake)
+include (${media_root}/lmo_adapter/api.cmake)
 
 set(api_inc
     ${SYSOPT_INCLUDE_DIRS}

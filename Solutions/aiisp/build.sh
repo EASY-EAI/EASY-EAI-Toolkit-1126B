@@ -36,8 +36,8 @@ deploy_res() {
 # 拷贝可执行文件到板端
 deploy_bin() {
 	BOARD_SOLU=$SYSROOT/userdata/Solu/$CUR_DIR_NAME
-	mkdir -p $BOARD_SOLU
-	cp $SHELL_FOLDER/Release/$CUR_DIR_NAME $BOARD_SOLU
+	sudo mkdir -p $BOARD_SOLU
+	sudo cp $SHELL_FOLDER/Release/$CUR_DIR_NAME $BOARD_SOLU
 	echo "binary deployed to $BOARD_SOLU"
 }
 

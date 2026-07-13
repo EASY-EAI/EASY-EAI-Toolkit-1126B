@@ -23,6 +23,19 @@ How to use：
 
 important update log:
 ---
+> 2026-07-13 :
+> * Release EASY-EAI-Toolkit-1126B-0.2.0
+> * update easyeai-api
+>     * media_api
+>         * [new] aov
+>         * [new] lmo_adapter
+>         * [remove] rockit_adapter
+>         * [remove] sdcard_recorder
+> * update Solution
+>     * [update] aov
+>     * [update] avs
+>     * [update] aiisp(black light)
+>
 > 2026-05-26 :
 > * Release EASY-EAI-Toolkit-1126B-0.1.2
 > * update easyeai-api

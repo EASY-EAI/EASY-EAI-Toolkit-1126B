@@ -245,7 +245,7 @@
 								"dynSetpoint":	{
 									"sw_aeT_dynSetpoint_len":	7,
 									"sw_aeT_expLevel_dot":	[0, 0.0001, 0.001, 0.01, 0.05, 0.5, 8],
-									"sw_aeT_dynSetpoint_dot":	[40, 40, 35, 30, 28, 26, 20]
+									"sw_aeT_dynSetpoint_dot":	[40, 40, 38, 35, 32, 30, 28]
 								},
 								"backLightCtrl":	{
 									"sw_aeT_backLit_en":	0,
@@ -264,8 +264,8 @@
 									}
 								},
 								"overExpCtrl":	{
-									"sw_aeT_overExp_en":	0,
-									"sw_aeT_overExpBias_strg":	0,
+									"sw_aeT_overExp_en":	1,
+									"sw_aeT_overExpBias_strg":	35,
 									"sw_aeT_overExpWgt_max":	2,
 									"sw_aeT_loLit_thred":	30,
 									"sw_aeT_hiLit_thred":	150,
@@ -273,7 +273,7 @@
 										"sw_aeT_overExpSetpoint_len":	6,
 										"sw_aeT_oePdf_dot":	[0.005, 0.01, 0.02, 0.03, 0.05, 0.07],
 										"sw_aeT_loLitWgt_dot":	[1, 1, 1, 1, 1, 1],
-										"sw_aeT_hiLitWgt_dot":	[10, 8, 6, 4, 2.5, 1.5]
+										"sw_aeT_hiLitWgt_dot":	[16, 12, 8, 5, 3, 2]
 									}
 								}
 							},
@@ -25111,7 +25111,7 @@
 						},
 						"ccm":	{
 							"tunning":	{
-								"opMode":	"RK_AIQ_OP_MODE_MANUAL",
+								"opMode":	"RK_AIQ_OP_MODE_AUTO",
 								"en":	1,
 								"bypass":	0,
 								"stAuto":	{
