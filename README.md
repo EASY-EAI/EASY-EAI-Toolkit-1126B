@@ -22,6 +22,14 @@
 
 重要更新：
 ---
+> 2026-07-22 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.2.1
+> * 更新 easyeai-api
+>     * 多媒体组件api
+>         * [更新] lmo_adapter
+> * 更新【开发实例】
+>     * [新增] dis
+>
 > 2026-07-13 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.2.0
 > * 更新 easyeai-api

@@ -23,6 +23,14 @@ How to use：
 
 important update log:
 ---
+> 2026-07-22 :
+> * Release EASY-EAI-Toolkit-1126B-0.2.1
+> * update easyeai-api
+>     * media_api
+>         * [update] lmo_adapter
+> * update Solution
+>     * [new] dis
+>
 > 2026-07-13 :
 > * Release EASY-EAI-Toolkit-1126B-0.2.0
 > * update easyeai-api

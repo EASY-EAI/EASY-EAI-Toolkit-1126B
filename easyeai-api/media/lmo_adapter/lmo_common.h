@@ -69,22 +69,97 @@ typedef enum {
 } LMO_RC_MODE_E;
 
 typedef enum {
-    LMO_COMPRESS_MODE_NONE = 0,
-    LMO_COMPRESS_MODE_TILE = 1,
-    LMO_COMPRESS_MODE_LINE = 2,
-    LMO_COMPRESS_MODE_FRAME = 3,
+    LMO_COMPRESS_MODE_NONE    = 0,
+    LMO_COMPRESS_AFBC_16x16   = 0x1,
+    LMO_COMPRESS_RFBC_64x4    = 0x2,
     LMO_COMPRESS_MODE_BUTT
 } LMO_COMPRESS_MODE_E;
 
 typedef enum {
-    LMO_FMT_YUV420SP   = 0,
-    LMO_FMT_YUV422SP   = 1,
-    LMO_FMT_NV12       = 10,
-    LMO_FMT_NV21       = 11,
-    LMO_FMT_ARGB8888   = 20,
-    LMO_FMT_BGRA8888   = 21,
-    LMO_FMT_BGRA5551   = 22,
-    LMO_FMT_BUTT
+    LMO_VIDEO_FORMAT_LINEAR = 0,        /* nature video line */
+    LMO_VIDEO_FORMAT_TILE_64x16,        /* tile cell: 64pixel x 16line */
+    LMO_VIDEO_FORMAT_TILE_16x8,         /* tile cell: 16pixel x 8line */
+    LMO_VIDEO_FORMAT_TILE_4x4,          /* tile cell: 4pixel x 4line */
+    LMO_VIDEO_FORMAT_LINEAR_DISCRETE,   /* The data bits are aligned in bytes */
+    LMO_VIDEO_FORMAT_BUTT
+} LMO_VIDEO_FORMAT_E;
+
+#define LMO_VIDEO_FMT_YUV    0x00000000
+#define LMO_VIDEO_FMT_RGB    0x00010000
+#define LMO_VIDEO_FMT_BPP    0x00020000
+#define LMO_VIDEO_FMT_BAYER  0x00030000
+
+typedef enum {
+    LMO_FMT_YUV420SP         = LMO_VIDEO_FMT_YUV,     /* YYYY... UV...            */
+    LMO_FMT_YUV420SP_10BIT,
+    LMO_FMT_YUV422SP,                                   /* YYYY... UVUV...          */
+    LMO_FMT_YUV422SP_10BIT,
+    LMO_FMT_YUV420P,                                    /* YYYY... UUUU... VVVV     */
+    LMO_FMT_YUV420P_VU,                                 /* YYYY... VVVV... UUUU     */
+    LMO_FMT_YUV420SP_VU,                                /* YYYY... VUVUVU...        */
+    LMO_FMT_YUV422P,                                    /* YYYY... UUUU... VVVV     */
+    LMO_FMT_YUV422SP_VU,                                /* YYYY... VUVUVU...        */
+    LMO_FMT_YUV422_YUYV,                                /* YUYVYUYV...              */
+    LMO_FMT_YUV422_UYVY,                                /* UYVYUYVY...              */
+    LMO_FMT_YUV400SP,                                   /* YYYY...                  */
+    LMO_FMT_YUV440SP,                                   /* YYYY... UVUV...          */
+    LMO_FMT_YUV411SP,                                   /* YYYY... UV...            */
+    LMO_FMT_YUV444,                                     /* YUVYUVYUV...             */
+    LMO_FMT_YUV444SP,                                   /* YYYY... UVUVUVUV...      */
+    LMO_FMT_YUV444P,                                    /* YYYY... UUUU... VVVV     */
+    LMO_FMT_YUV422_YVYU,                                /* YVYUYVYU...              */
+    LMO_FMT_YUV422_VYUY,                                /* VYUYVYUY...              */
+    LMO_FMT_YUV_BUTT,
+
+    LMO_FMT_RGB565          = LMO_VIDEO_FMT_RGB,       /* 16-bit RGB               */
+    LMO_FMT_BGR565,                                     /* 16-bit RGB               */
+    LMO_FMT_RGB555,                                     /* 15-bit RGB               */
+    LMO_FMT_BGR555,                                     /* 15-bit RGB               */
+    LMO_FMT_RGB444,                                     /* 12-bit RGB               */
+    LMO_FMT_BGR444,                                     /* 12-bit RGB               */
+    LMO_FMT_RGB888,                                     /* 24-bit RGB               */
+    LMO_FMT_BGR888,                                     /* 24-bit RGB               */
+    LMO_FMT_RGB101010,                                  /* 30-bit RGB               */
+    LMO_FMT_BGR101010,                                  /* 30-bit RGB               */
+    LMO_FMT_ARGB1555,                                   /* 16-bit RGB               */
+    LMO_FMT_ABGR1555,                                   /* 16-bit RGB               */
+    LMO_FMT_ARGB4444,                                   /* 16-bit RGB               */
+    LMO_FMT_ABGR4444,                                   /* 16-bit RGB               */
+    LMO_FMT_ARGB8565,                                   /* 24-bit RGB               */
+    LMO_FMT_ABGR8565,                                   /* 24-bit RGB               */
+    LMO_FMT_ARGB8888,                                   /* 32-bit RGB               */
+    LMO_FMT_ABGR8888,                                   /* 32-bit RGB               */
+    LMO_FMT_BGRA8888,                                   /* 32-bit RGB               */
+    LMO_FMT_RGBA8888,                                   /* 32-bit RGB               */
+    LMO_FMT_RGBA5551,                                   /* 16-bit RGB               */
+    LMO_FMT_BGRA5551,                                   /* 16-bit RGB               */
+    LMO_FMT_BGRA4444,                                   /* 16-bit RGB               */
+    LMO_FMT_RGBA4444,                                   /* 16-bit RGB               */
+    LMO_FMT_XBGR8888,                                   /* 32-bit RGB               */
+    LMO_FMT_RGB_BUTT,
+
+    LMO_FMT_2BPP            = LMO_VIDEO_FMT_BPP,
+    LMO_FMT_8BPP,
+    LMO_FMT_1BPP,
+
+    LMO_FMT_RGB_BAYER_SBGGR_8BPP = LMO_VIDEO_FMT_BAYER,  /* 8-bit raw                */
+    LMO_FMT_RGB_BAYER_SGBRG_8BPP,
+    LMO_FMT_RGB_BAYER_SGRBG_8BPP,
+    LMO_FMT_RGB_BAYER_SRGGB_8BPP,
+    LMO_FMT_RGB_BAYER_SBGGR_10BPP,
+    LMO_FMT_RGB_BAYER_SGBRG_10BPP,
+    LMO_FMT_RGB_BAYER_SGRBG_10BPP,
+    LMO_FMT_RGB_BAYER_SRGGB_10BPP,
+    LMO_FMT_RGB_BAYER_SBGGR_12BPP,
+    LMO_FMT_RGB_BAYER_SGBRG_12BPP,
+    LMO_FMT_RGB_BAYER_SGRBG_12BPP,
+    LMO_FMT_RGB_BAYER_SRGGB_12BPP,
+    LMO_FMT_RGB_BAYER_SBGGR_16BPP,
+    LMO_FMT_RGB_BAYER_SGBRG_16BPP,
+    LMO_FMT_RGB_BAYER_SGRBG_16BPP,
+    LMO_FMT_RGB_BAYER_SRGGB_16BPP,
+    LMO_FMT_RGB_BAYER_BUTT,
+    LMO_FMT_BUTT            = LMO_FMT_RGB_BAYER_BUTT,
 } LMO_PIXEL_FORMAT_E;
 
 typedef enum {
@@ -117,6 +192,7 @@ typedef struct LMO_VO_IMPL     LMO_VO_S;
 typedef struct LMO_RGN_IMPL    LMO_RGN_S;
 typedef struct LMO_TDE_IMPL    LMO_TDE_S;
 typedef struct LMO_IVS_IMPL    LMO_IVS_S;
+typedef struct LMO_GDC_IMPL    LMO_GDC_S;
 
 #ifdef ROCKIVA
 typedef struct LMO_IVA_IMPL    LMO_IVA_S;
@@ -136,6 +212,7 @@ typedef struct LMO_AIQ_CAMGROUP_CFG_IMPL  LMO_AIQ_CAMGROUP_CFG_S;
 #define LMO_ID_VPSS  6
 #define LMO_ID_VI    8
 #define LMO_ID_AVS   17
+#define LMO_ID_GDC   18
 
 /* VI memory type */
 #define LMO_VI_MEM_DMABUF  4
@@ -187,6 +264,7 @@ typedef struct {
     LMO_U32 height;
     LMO_S32 pixelFormat;          /* LMO_PIXEL_FORMAT_E */
     LMO_S32 compressMode;         /* LMO_COMPRESS_MODE_E, default NONE */
+    LMO_S32 videoFormat;          /* LMO_VIDEO_FORMAT_E, default LINEAR(0) */
     bool    wrapIfEnable;
     bool    openEptz;
     bool    ispGroupInit;
@@ -383,6 +461,65 @@ typedef struct {
     LMO_S32 chnId;
 } LMO_IVS_Params;
 
+/* GDC channel mode */
+typedef enum {
+    LMO_GDC_MODE_EIS = 0,
+    LMO_GDC_MODE_FEC = 1,
+    LMO_GDC_MODE_DIS = 2,
+} LMO_GDC_MODE_E;
+
+typedef enum {
+    LMO_GDC_INFO_CB_SUCCESS = 0,
+    LMO_GDC_INFO_CB_CANCEL,
+    LMO_GDC_INFO_CB_ERROR,
+} LMO_GDC_INFO_CB_RESULT_E;
+
+typedef struct {
+    LMO_S64  s64Timestamp;
+    double   dTemp;
+    double   dGyroData[3];
+    double   dAccData[3];
+} LMO_GDC_SENSOR_INFO_S;
+
+typedef struct {
+    LMO_U64  u64ExtraPts;
+    LMO_U32  u32RsSkew;
+    LMO_U32  u32ExpTime;
+    LMO_U32  u32Again;
+    LMO_U32  u32Dgain;
+    LMO_U32  u32Ispgain;
+    double   dIso;
+    void    *pMbBlk;               /* MB_BLK */
+    LMO_U32  u32Width;
+    LMO_U32  u32Height;
+    LMO_U32  u32VirWidth;
+    LMO_U32  u32VirHeight;
+    LMO_S32  enPixelFormat;        /* LMO_PIXEL_FORMAT_E */
+    LMO_S32  enCompressMode;       /* LMO_COMPRESS_MODE_E */
+    LMO_U32  u32Seq;
+    LMO_U64  u64PTS;
+} LMO_GDC_VFAME_INFO_S;
+
+typedef LMO_S32 (*LMO_GDC_SensorCB)(void *pUsr, LMO_GDC_SENSOR_INFO_S *pInfo);
+typedef LMO_S32 (*LMO_GDC_VframeCB)(void *pUsr, LMO_GDC_VFAME_INFO_S  *pInfo);
+
+/* ---- GDC ---- */
+typedef struct {
+    LMO_S32 chnId;
+    LMO_U32 maxInQueue;
+    LMO_U32 maxOutQueue;
+    LMO_S32 dstWidth;
+    LMO_S32 dstHeight;
+    LMO_S32 mode;               /* LMO_GDC_MODE_E, default EIS */
+    LMO_S32 iioDevNo;           /* EIS sensor (IIO) device number */
+    LMO_S32 dstCompMode;        /* LMO_COMPRESS_MODE_E */
+    LMO_S32 dstPixelFormat;     /* LMO_PIXEL_FORMAT_E */
+    LMO_S32 depth;              /* 0 = default */
+    const char *cfgFile;        /* EIS/FEC config file path */
+    LMO_GDC_SensorCB sensorCb;  /* NULL = no sensor callback */
+    LMO_GDC_VframeCB vframeCb;  /* NULL = no vframe callback */
+} LMO_GDC_Params;
+
 /*
  * ============================================================
  *  VI (Video Input)
@@ -485,6 +622,61 @@ void       LMO_COMM_TDE_Destroy(LMO_TDE_S *ctx);
 
 LMO_IVS_S *LMO_COMM_IVS_Create(const LMO_IVS_Params *params);
 void       LMO_COMM_IVS_Destroy(LMO_IVS_S *ctx);
+
+/*
+ * ============================================================
+ *  GDC (Geometric Distortion Correction / EIS)
+ * ============================================================
+ */
+LMO_GDC_S *LMO_COMM_GDC_Create(const LMO_GDC_Params *params);
+void       LMO_COMM_GDC_Destroy(LMO_GDC_S *ctx);
+LMO_S32    LMO_COMM_GDC_GetFrame(LMO_GDC_S *ctx, void **pdata, LMO_S32 s32MilliSec);
+LMO_S32    LMO_COMM_GDC_ReleaseFrame(LMO_GDC_S *ctx);
+LMO_S32    LMO_COMM_GDC_SendFrame(LMO_GDC_S *ctx, const void *pstFrame,
+                                  LMO_S32 s32MilliSec);
+LMO_S32    LMO_COMM_GDC_RegisterInfoCB(LMO_GDC_S *ctx);
+LMO_S32    LMO_COMM_GDC_GetFd(LMO_GDC_S *ctx);
+LMO_S32    LMO_COMM_GDC_GetUpdateAttr(LMO_GDC_S *ctx, void *pstAttr);
+LMO_S32    LMO_COMM_GDC_Update(LMO_GDC_S *ctx, const void *pstAttr);
+LMO_S32    LMO_COMM_GDC_GetChnId(const LMO_GDC_S *ctx);
+
+
+LMO_S32 LMO_COMM_GDC_BeginJob(LMO_S32 *phHandle);
+LMO_S32 LMO_COMM_GDC_EndJob(LMO_S32 hHandle);
+LMO_S32 LMO_COMM_GDC_CancelJob(LMO_S32 hHandle);
+LMO_S32 LMO_COMM_GDC_StopJob(LMO_S32 hHandle);
+LMO_S32 LMO_COMM_GDC_SetConfig(LMO_S32 hHandle, const void *pstJobConfig);
+
+LMO_S32 LMO_COMM_GDC_AddCorrectionTask(LMO_S32 hHandle, const void *pstTask,
+                                        const void *pstFisheyeAttr);
+LMO_S32 LMO_COMM_GDC_AddCorrectionExTask(LMO_S32 hHandle, const void *pstTask,
+                                         const void *pstFishEyeAttrEx,
+                                         LMO_S32 bCheckMode);
+LMO_S32 LMO_COMM_GDC_AddPMFTask(LMO_S32 hHandle, const void *pstTask,
+                                const void *pstGdcPmfAttr);
+
+LMO_S32 LMO_COMM_GDC_FisheyePosQueryDst2Src(const void *pstAttr,
+                                            const void *pstVideoInfo,
+                                            const void *pstDstPoint,
+                                            void *pstSrcPoint);
+LMO_S32 LMO_COMM_GDC_FisheyePosQueryDst2SrcArray(const void *pstAttr,
+                                                 const void *pstVideoInfo,
+                                                 LMO_U32 u32PointNum,
+                                                 const void *pastDstPoint,
+                                                 void *pastSrcPoint);
+LMO_S32 LMO_COMM_GDC_FisheyePosQueryDst2Pano(const void *pstAttr,
+                                             const void *pstVideoInfo,
+                                             LMO_U32 u32PanoRegionIndex,
+                                             const void *pstDstPoint,
+                                             void *pstPanoPoint);
+LMO_S32 LMO_COMM_GDC_FisheyePosQueryDst2PanoArray(const void *pstAttr,
+                                                  const void *pstVideoInfo,
+                                                  LMO_U32 u32PanoRegionIndex,
+                                                  LMO_U32 u32PointNum,
+                                                  const void *pastDstPoint,
+                                                  void *pastPanoPoint);
+
+LMO_S32 LMO_COMM_GDC_GetAttrFromFile(void *pstAttr, const char *pFile);
 
 #ifdef ROCKIVA
 LMO_IVA_S *LMO_COMM_IVA_Create(void);
