@@ -22,6 +22,30 @@
 
 重要更新：
 ---
+> 2026-08-05 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.2.2
+> * 更新 easyeai-api
+>     * 算法组件api
+>         * [更新] bsd
+>         * [更新] car_detect
+>         * [更新] face_detect
+>         * [更新] face_landmark98
+>         * [更新] face_recognition
+>         * [更新] fire_detect
+>         * [更新] gsetures_detect
+>         * [更新] helmet_detect
+>         * [更新] lpr
+>         * [更新] ocr
+>         * [更新] person_detect
+>         * [更新] person_pose
+>         * [更新] speech_recognition
+>     * 通用组件api
+>         * [更新] 进程间通信
+>         * [更新] 日志管理
+>     * 多媒体组件api
+>         * [更新] display
+>         * [更新] lmo_adapter
+>
 > 2026-07-22 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.2.1
 > * 更新 easyeai-api

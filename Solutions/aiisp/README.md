@@ -2,7 +2,7 @@
 
 ## 1. 功能概览
 
-`Solutions/aiisp` 在 rv1126b 上通过 **rkaiq 内部 AIBNR 链路**启用 AI-ISP 黑光降噪，
+`Solutions/aiisp` 在 rv1126b 上通过 **rkaiq AIBNR 链路**启用 AI-ISP 黑光降噪，
 支持**单摄 / 双摄**同时跑 AIISP，不依赖 `librkpostisp.so`（该库在 rv1126b SDK 中未提供）。
 
 AIBNR 激活后以 10fps 对 Bayer 域进行 NPU 推理降噪，再由 ISP 完成后续处理。
@@ -75,7 +75,7 @@ aiisp/
 |------|:----:|:-------------:|:------------:|:---------------:|
 | 无参数 / `all` | ✓ | ✓ | (`all`) | (`all`) |
 | `deploy` | | | ✓ | ✓ |
-| `clear` | 清理 `build/` + `Release/` | | | |
+| `clear` | 清理 `build/` + `Release/aiisp` | | | |
 
 ## 5. 参数说明
 

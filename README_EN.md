@@ -23,6 +23,30 @@ How to use：
 
 important update log:
 ---
+> 2026-08-05 :
+> * Release EASY-EAI-Toolkit-1126B-0.2.2
+> * update easyeai-api
+>     * algorithm_api
+>         * [update] bsd
+>         * [update] car_detect
+>         * [update] face_detect
+>         * [update] face_landmark98
+>         * [update] face_recognition
+>         * [update] fire_detect
+>         * [update] gsetures_detect
+>         * [update] helmet_detect
+>         * [update] lpr
+>         * [update] ocr
+>         * [update] person_detect
+>         * [update] person_pose
+>         * [update] speech_recognition
+>     * common_api
+>         * [update] ipc
+>         * [update] log_manager
+>     * media_api
+>         * [update] display
+>         * [update] lmo_adapter
+>
 > 2026-07-22 :
 > * Release EASY-EAI-Toolkit-1126B-0.2.1
 > * update easyeai-api

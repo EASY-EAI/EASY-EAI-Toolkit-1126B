@@ -2,12 +2,12 @@
 
 ## 1. 功能概览
 
-- **AOV 状态机调度** — IDLE / ACTIVE / ENTERING / LEAVING / FIRST_RUN 五态切换
+- **AOV 状态管理** — IDLE / ACTIVE 两态切换
 - **休眠 / 定时唤醒** — 写 `/sys/power/state` 进入深度睡眠，MCU 定时器唤醒
 - **帧模式切换** — 单帧模式 (低功耗 1fps) ↔ 多帧模式 (正常录像 15fps) 自动切换
 - **双 Sensor 拼接** — AVS 三模式：融合 (BLEND) / 垂直 (VERTICAL) / 水平 (HORIZONTAL)
 - **H.264/H.265 编码** — 主码流 + 子码流双通道
-- **MP4 录像** — 自研 fMP4 Muxer 封装后写入 SD 卡，自动切片
+- **MP4 录像** — fMP4 封装后写入 SD 卡，自动切片
 - **OSD 叠加** — 32-bit BGRA BMP 点阵水印 (背景透明)，AOV 单帧模式右下角显示标记
 - **外设热管理** — 休眠前自动解绑 USB / Ethernet / SDIO / 声卡驱动降漏电
 
@@ -22,7 +22,7 @@
                                    ▼                ▼
                               chn0 (全分辨率)   chn1 (半分辨率)
                               → VENC MAIN       → VENC SUB
-                              → MP4 录像         → RTSP 子码流
+                              → MP4 录像         → MP4 录像
 ```
 
 ## 3. 目录结构
@@ -30,9 +30,7 @@
 ```
 aov/
 ├── src/
-│   └── app/
-│       └── user.c                  # AOV 全功能 Demo (状态机 + 录像 + OSD + 命令行)
-├── include/                        # (预留)
+│   └── aov.c                       # AOV 全功能 Demo (状态机 + 录像 + OSD + 命令行)
 ├── osd_aov.bmp                     # OSD 叠加水印 (32-bit BGRA BMP, 128×48, 背景透明)
 ├── gen_osd_bmp.py                  # OSD BMP 生成工具 (纯 Python 标准库)
 ├── build.sh                        # 编译 / 部署脚本
@@ -47,21 +45,21 @@ AOV API 位于 `easyeai-api/media/aov/`，通过 `api.cmake` 引入：
 
 | 头文件 | 职责 |
 |--------|------|
-| `aov.h` | AOV 状态机、调度线程、回调注册 |
+| `aov.h` | AOV 状态管理、回调注册 |
 | `aov_video.h` | 视频管线统一 API (VI / AVS / VENC) |
-| `aov_record.h` | 录像上下文、文件创建/追加、落盘/fsync |
+| `aov_record.h` | 录像文件管理 |
 | `aov_record_queue.h` | 录像帧缓冲队列 (抗 SD 卡抖动) |
-| `aov_isp.h` | rk_aiq_uapi2 初始化 + pause/resume |
-| `aov_helper.h` | 驱动 bind/unbind、CPU 热插拔、sysfs 操作 |
+| `aov_isp.h` | ISP 初始化 + pause/resume |
+| `aov_helper.h` | 外设驱动管理、CPU 热插拔 |
 | `aov_error.h` | 错误码定义 |
 
-应用层 `user.c` 负责组装上述模块，实现完整 AOV Demo 流程。
+应用层 `aov.c` 负责组装上述模块，实现完整 AOV Demo 流程。
 
 ## 5. 入口说明
 
 | 入口 | 功能 |
 |------|------|
-| [`user.c`](src/app/user.c) | 完整 AOV 流程：ISP→SYS→录像→OSD→VENC→命令行测试序列 |
+| [`aov.c`](src/aov.c) | 完整 AOV 流程：ISP→SYS→录像→OSD→VENC→命令行测试序列 |
 
 ## 6. 编译与部署
 
@@ -69,10 +67,10 @@ AOV API 位于 `easyeai-api/media/aov/`，通过 `api.cmake` 引入：
 
 ```bash
 cd Solutions/aov
-./build.sh          # 编译，输出到 Release/aov
+./build.sh          # 编译，输出到 Release/aov，并自动部署到板端
 ./build.sh clear    # 清除编译产物
 ./build.sh cpres    # 仅拷贝 Release/ 到板端 (不编译)
-./build.sh all      # 编译 + 拷贝到板端
+./build.sh all      # 编译 + 拷贝到板端 (含 osd_aov.bmp)
 ```
 
 ### 6.2 CMake 选项
@@ -130,11 +128,11 @@ cd Solutions/aov
 
 | 模式 | 枚举值 | 效果 | chn0 分辨率 (2×sensor) |
 |------|--------|------|------------------------|
-| `AVS_SPLICE_BLEND` | 0 | 融合拼接 | 3840×2160 |
+| `AVS_SPLICE_BLEND` | 0 | 融合拼接 | 3840×1080 |
 | `AVS_SPLICE_VERTICAL` | 1 | 垂直拼接 (上下) | 1920×2160 |
 | `AVS_SPLICE_HORIZONTAL` | 2 | 水平拼接 (左右) | 3840×1080 |
 
-在 [`user.c`](src/app/user.c) 中通过 `vi_attr.avs_mode` 设置视频管线拼接模式。
+在 [`aov.c`](src/aov.c) 中通过 `vi_attr.avs_mode` 设置视频管线拼接模式。
 
 ## 9. OSD 叠加
 
@@ -177,7 +175,7 @@ python3 gen_osd_bmp.py -o ./osd_aov.bmp -W 128 -H 48 -t AOV -s 4 -c 0,0,255 -b 0
 
 ### 9.2 运行时加载
 
-`user.c` 中通过 `LMO_COMM_RGN_Create()` 加载 `./osd_aov.bmp`（像素格式 `LMO_FMT_BGRA8888`），
+`aov.c` 中通过 `LMO_COMM_RGN_Create()` 加载 `./osd_aov.bmp`（像素格式 `LMO_FMT_BGRA8888`），
 在 VENC 启动前完成 OSD 区域注册，确保首帧就有水印覆盖。AOV 进入时显示水印，退出时隐藏。
 
 ## 10. 初始化流程
@@ -185,14 +183,16 @@ python3 gen_osd_bmp.py -o ./osd_aov.bmp -W 128 -H 48 -t AOV -s 4 -c 0,0,255 -b 0
 ```
 Step 1: ISP 初始化          aov_isp_init()
 Step 2: SYS 初始化          RK_MPI_SYS_Init()
-Step 3: 录像队列初始化       aov_record_queue_init()
-Step 4: 录像模块初始化       aov_record_init(cfg) × (sensor × channel)
-Step 5: OSD 初始化           user_osd_init_all() → LMO_COMM_RGN_Create()
-Step 6: VENC 启动            aov_video_venc_start(cb)
-Step 7: AOV 初始化           aov_init(action_t)  → 注册回调 + 启动调度线程
-Step 8: 执行测试序列         run_test_sequence(argc, argv)
-Step 9: 等待退出信号         while(g_running) sleep(1)
-Step 10: 清理               restore_peripherals → osd_deinit → destroy_pipeline
+Step 3: SD 卡准备            record_release_system_sdcard → Aov_BindSdcard → record_wait_sd_storage
+Step 4: 视频管线构建         build_video_pipeline() (VI init + VENC init)
+Step 5: 录像队列 + drain 线程  record_queue_create → record_drain_start
+Step 6: 录像模块初始化       aov_record_init(cfg) × (sensor × channel)
+Step 7: OSD 初始化           user_osd_init_all() → LMO_COMM_RGN_Create()
+Step 8: VENC 启动            aov_video_venc_start(cb)
+Step 9: AOV 初始化           aov_init(action_t)  → 注册回调
+Step 10: 执行测试序列        run_test_sequence(argc, argv)
+Step 11: 等待退出信号        while(g_running) sleep(1)
+Step 12: 清理               restore_peripherals → osd_deinit → destroy_pipeline
           → record_deinit → queue_deinit → aov_deinit → SYS_Exit → isp_deinit
 ```
 

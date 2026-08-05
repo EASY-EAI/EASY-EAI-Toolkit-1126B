@@ -1,11 +1,12 @@
 #include <stdio.h>
-
+#if 0
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
-
+#endif
 #include "jpegCodec.h"
 
+#if 0
 typedef struct {
     GstElement *pipeline;
     GstElement *appsrc;
@@ -50,9 +51,10 @@ static GstFlowReturn new_sample(GstElement *appsink, OutDataCB pOutFunc) {
     }
     return GST_FLOW_OK;
 }
-
+#endif
 int JpegDec_init(const char *strDecoder, OutDataCB pOutFunc)
 {
+#if 0
     //gst_init(&argc, &argv);
     gst_init(NULL, NULL);
     
@@ -101,13 +103,14 @@ int JpegDec_init(const char *strDecoder, OutDataCB pOutFunc)
         return -1;
     }
     //=========================================================================================
-
+#endif
     return 0;
 }
 
 
 void JpegDec_start()
 {
+#if 0
     // 1--启动管道
     gst_element_set_state(g_decpipe_obj.pipeline, GST_STATE_PLAYING);
     //=========================================================================================
@@ -122,7 +125,7 @@ void JpegDec_start()
     
     gst_object_unref(bus);
     //=========================================================================================
-
+#endif
     return ;
 }
 
@@ -130,6 +133,7 @@ void JpegDec_start()
 // Jpeg格式数据需从此处送入 Jpeg解码器。
 int JpegDec_pushData(char *pJpegData, int dataSize, int isEOS)
 {
+#if 0
     if ((NULL == pJpegData) || (dataSize <= 0)) {
         // 发送EOS结束标志
         gst_app_src_end_of_stream(GST_APP_SRC(g_decpipe_obj.appsrc));
@@ -159,12 +163,16 @@ int JpegDec_pushData(char *pJpegData, int dataSize, int isEOS)
     }
 
     return G_SOURCE_CONTINUE;
+#else
+    return 0;
+#endif
 }
 
 int JpegDec_unInit()
 {
+#if 0
     gst_element_set_state(g_decpipe_obj.pipeline, GST_STATE_NULL);
     gst_object_unref(g_decpipe_obj.pipeline);
-
+#endif
     return 0;
 }

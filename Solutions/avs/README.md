@@ -27,7 +27,7 @@ Solutions/avs/
 ├── build.sh                      # 编译与部署脚本
 ├── CMakeLists.txt
 ├── src/
-│   └── sample_demo_vi_avs_venc.c # 主程序（VI + AVS + VENC + RTSP）
+│   └── lmo_demo_vi_avs_venc.c     # 主程序（VI + AVS + VENC + RTSP）
 ├── ko/                           # 内核模块（kernel 6.1.141）
 │   ├── video_rkavsp.ko           # AVSP 硬件驱动（融合拼接必需）
 │   └── video_rkfec.ko            # FEC 硬件驱动（融合拼接必需）
@@ -96,7 +96,7 @@ insmod /userdata/Solu/avs/video_rkfec.ko
 | `--set_ldch < -1 / 1 / 2 >` | -1=禁用, 1=文件加载, 2=buffer 加载 | `2` |
 | `--vi_buffcnt <num>` | VI buffer 数量 | `2` |
 | `--vi_chnid <id>` | VI 通道 ID | `1` |
-| `--osd_display <0/1>` | OSD 显示开关 | `1` |
+| `--osd_display <0/1>` | OSD 显示开关 | `0` |
 | `--input_bmp_path <file>` | OSD 水印 BMP 图片路径 | — |
 | `-l <N>` | 编码帧数上限（-1 无限） | `-1` |
 | `-o <path>` | 编码码流本地保存路径 | — |
@@ -121,8 +121,7 @@ insmod /userdata/Solu/avs/video_rkfec.ko
 RV1126B (aarch64) 的融合拼接与 RK3576 平台不同：
 
 - RK3576 使用 GPU 加速库 `librkgfx_avs.so`，支持 `AVS_PARAM_SOURCE_CALIB` + XML
-- RV1126B aarch64 的 `librockit.so` 在 CALIB 模式下会尝试 dlopen `librkAVS_genLutAndStitch.so`，但该库只有 32-bit ARM 版本，无法加载
-- RV1126B aarch64 **必须通过 `AVS_GRP_ATTR_S.jsonPath` 字段传入 JSON 配置**，`librockit.so` 会 dlopen `librkALG_avsCore.so`（aarch64）并调用 `rkAlg_initAvs(jsonPath)`
+- RV1126B aarch64 不支持 CALIB 模式，**必须通过 `AVS_GRP_ATTR_S.jsonPath` 字段传入 JSON 配置**，由 `librkALG_avsCore.so` 完成融合拼接
 
 ### JSON 配置文件
 
@@ -140,8 +139,8 @@ JSON 文件中 `CalibFilePath` 字段指向板端的标定 XML。如需使用自
 
 | `--ispLaunchMode` | 含义 | RV1126B 状态 |
 |:-----------------:|------|:------------:|
-| `0` | 单路 ISP 初始化（每路 VI 独立调用 `SAMPLE_COMM_ISP_Init` + `SAMPLE_COMM_ISP_Run`） | ✅ 已验证，工作正常 |
-| `1` | CamGroup ISP 初始化（调用 `SAMPLE_COMM_ISP_CamGroup_Init`） | ⚠️ VENC 有时收不到帧（`0XA004800E` 超时），原因排查中 |
+| `0` | 单路 ISP 初始化（每路 VI 独立调用 `LMO_ISP_Init` + `LMO_ISP_Run`） | ✅ 已验证，工作正常 |
+| `1` | CamGroup ISP 初始化（调用 `LMO_ISP_CamGroup_Init`） | ⚠️ VENC 有时收不到帧（`0XA004800E` 超时），原因排查中 |
 
 **建议使用 `--ispLaunchMode 0`**。
 
@@ -198,7 +197,7 @@ vlc rtsp://<board-ip>:554/live/1
 
 ## 11. 注意事项
 
-1. **子码流码率固定**：`-b` 参数仅控制主码流码率。子码流（VENC[1]）码率在代码中硬编码为 1024 kbps，如需修改可编辑 [`src/sample_demo_vi_avs_venc.c`](Solutions/avs/src/sample_demo_vi_avs_venc.c:608) 中 `venc[1].u32BitRate` 的值。
+1. **子码流码率固定**：`-b` 参数仅控制主码流码率。子码流（VENC[1]）码率在代码中硬编码为 1024 kbps，如需修改可编辑 [`src/lmo_demo_vi_avs_venc.c`](Solutions/avs/src/lmo_demo_vi_avs_venc.c:458) 中 `vp1.bitRate` 的值。
 2. **CamGroup 模式**：`--ispLaunchMode 1` 在 RV1126B 上 VENC 可能收不到帧，建议使用 `--ispLaunchMode 0`。
 3. **融合拼接高度**：使用融合拼接时，`--avs_chn0_size` 的高度必须与 JSON 中 `DstHeight` 对齐（16 字节对齐）。
 4. **驱动加载**：融合拼接需要加载 `video_rkavsp.ko` 和 `video_rkfec.ko`，重启后需重新加载。水平/垂直拼接不需要。
