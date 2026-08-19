@@ -4,11 +4,11 @@
 #include <sstream>
 #include <string>
 //=====================   C   =====================
-#include <gst/video/video-info.h>
+//#include <gst/video/video-info.h>
 #include "system.h"
 //=====================  SDK  =====================
 #include "system_opt.h"
-#include "gst_opt.h"
+//#include "gst_opt.h"
 //=====================  PRJ  =====================
 #include "decChannel.h"
 

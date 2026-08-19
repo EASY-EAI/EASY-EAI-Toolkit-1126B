@@ -1,3 +1,4 @@
+include(${CMAKE_CURRENT_LIST_DIR}/../../env.cmake)
 # source code path
 file(GLOB LOGMANAGER_SOURCE_DIRS
     ${CMAKE_CURRENT_LIST_DIR}/*.c 
@@ -6,7 +7,7 @@ file(GLOB LOGMANAGER_SOURCE_DIRS
 
 # static Library paths
 file(GLOB LOGMANAGER_LIBS_DIRS
-    ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/${CMAKE_BOARDSYS}
     )
 
 # headfile path

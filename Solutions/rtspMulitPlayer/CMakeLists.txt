@@ -26,14 +26,14 @@ set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=gold")
 set(toolkit_root ${CMAKE_CURRENT_SOURCE_DIR}/../../easyeai-api)
 set(algorithm_root ${toolkit_root}/algorithm)
 set(common_root    ${toolkit_root}/common)
-set(meida_root     ${toolkit_root}/media)
+set(media_root     ${toolkit_root}/media)
 
 include (${common_root}/base64/api.cmake)
 include (${common_root}/system_opt/api.cmake)
 include (${common_root}/log_manager/api.cmake)
-include (${meida_root}/rga/api.cmake)
-include (${meida_root}/gst_opt/api.cmake)
-include (${meida_root}/display/api.cmake)
+include (${media_root}/rga/api.cmake)
+include (${media_root}/gst_opt/api.cmake)
+include (${media_root}/display/api.cmake)
 include (${algorithm_root}/person_detect/api.cmake)
 ## api头文件路径
 set(api_inc 
@@ -114,8 +114,8 @@ set(custom_inc
 )
 # -L
 link_directories(
-    ${CAMKE_SYSROOT}/usr/lib/aarch64-linux-gnu/lapack
-    ${CAMKE_SYSROOT}/usr/lib/aarch64-linux-gnu/blas
+    ${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu/lapack
+    ${CMAKE_SYSROOT}/usr/lib/aarch64-linux-gnu/blas
     #${PROJECT_SOURCE_DIR}/libs 
 )
 # -l

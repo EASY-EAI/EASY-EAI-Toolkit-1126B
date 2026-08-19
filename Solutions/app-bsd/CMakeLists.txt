@@ -32,17 +32,18 @@ include (${common_root}/base64/api.cmake)
 include (${common_root}/system_opt/api.cmake)
 include (${common_root}/log_manager/api.cmake)
 include (${meida_root}/rga/api.cmake)
-include (${meida_root}/gst_opt/api.cmake)
+#include (${meida_root}/gst_opt/api.cmake)
 include (${meida_root}/display/api.cmake)
 include (${algorithm_root}/bsd/api.cmake)
 include (${algorithm_root}/person_detect/api.cmake)
+
 ## api头文件路径
 set(api_inc 
     ${BASE64_INCLUDE_DIRS} 
     ${SYSOPT_INCLUDE_DIRS} 
     ${LOGMANAGER_INCLUDE_DIRS} 
     ${RGA_INCLUDE_DIRS} 
-    ${GSTOPT_INCLUDE_DIRS} 
+    #${GSTOPT_INCLUDE_DIRS} 
     ${DISPLAY_INCLUDE_DIRS} 
     ${BSD_INCLUDE_DIRS} 
     ${PERSON_DETECT_INCLUDE_DIRS} 
@@ -56,7 +57,7 @@ file(GLOB api_srcs
 ## api静态库文件路径
 link_directories(
     ${LOGMANAGER_LIBS_DIRS} 
-    ${GSTOPT_LIBS_DIRS} 
+    #${GSTOPT_LIBS_DIRS} 
     ${DISPLAY_LIBS_DIRS} 
     ${BSD_LIBS_DIRS} 
     ${PERSON_DETECT_LIBS_DIRS} 
@@ -67,7 +68,7 @@ set(sysLib_list
     ${SYSOPT_LIBS} 
     ${LOGMANAGER_LIBS} 
     ${RGA_LIBS} 
-    ${GSTOPT_LIBS} 
+    #${GSTOPT_LIBS} 
     ${DISPLAY_LIBS} 
     ${PERSON_DETECT_LIBS} 
     ${BSD_LIBS} 

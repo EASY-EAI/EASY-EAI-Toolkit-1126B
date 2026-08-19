@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <gst/gst.h>
+//#include <gst/gst.h>
 
 
 #include "camera.h"
