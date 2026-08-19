@@ -1,3 +1,4 @@
+include(${CMAKE_CURRENT_LIST_DIR}/../../env.cmake)
 # ============================================================
 # 头文件路径 — 只暴露 lmo_common.h
 # ============================================================
@@ -9,7 +10,7 @@ set(LMO_ADAPTER_INCLUDE_DIRS
 # 预编译库
 # ============================================================
 set(LMO_ADAPTER_LIBS
-    ${CMAKE_CURRENT_LIST_DIR}/liblmo_adapter.a
+    ${CMAKE_CURRENT_LIST_DIR}/${CMAKE_BOARDSYS}/liblmo_adapter.a
     rockit
     rkaiq
     )

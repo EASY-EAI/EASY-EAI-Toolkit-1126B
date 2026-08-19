@@ -1,3 +1,4 @@
+include(${CMAKE_CURRENT_LIST_DIR}/../../env.cmake)
 # ============================================================
 # 头文件路径
 # ============================================================
@@ -9,8 +10,5 @@ set(AOV_INCLUDE_DIRS
 # 预编译库
 # ============================================================
 set(AOV_LIBS
-    ${CMAKE_CURRENT_LIST_DIR}/libaov.a
+    ${CMAKE_CURRENT_LIST_DIR}/${CMAKE_BOARDSYS}/libaov.a
     )
-
-
-set(AOV_SOURCE_DIRS)

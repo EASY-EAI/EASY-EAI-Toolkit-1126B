@@ -1,5 +1,5 @@
-##ÔÚ/usr/share/cmake-3.18/Modules/Ä¿Â¼ÏÂµÄFind*.cmake£¬¶¼ÄÜÍ¨¹ýÕâÖÖ·½Ê½±»ÕÒµ½
-##¾ßÌåµÄ±äÁ¿(Èç${OpenCV_INCLUDE_DIRS}¡¢${OpenCV_LIBS})»á±»¶¨ÒåÔÚÀïÃæµÄÏà¶ÔÓ¦µÄFind*.cmakeÎÄ¼þÖÐ(Í¨³£¾ÍÐ´ÔÚ¿ªÍ·µÄÃèÊöÀï)
+##åœ¨/usr/share/cmake-3.18/Modules/ç›®å½•ä¸‹çš„Find*.cmakeï¼Œéƒ½èƒ½é€šè¿‡è¿™ç§æ–¹å¼è¢«æ‰¾åˆ°
+##å…·ä½“çš„å˜é‡(å¦‚${OpenCV_INCLUDE_DIRS}ã€${OpenCV_LIBS})ä¼šè¢«å®šä¹‰åœ¨é‡Œé¢çš„ç›¸å¯¹åº”çš„Find*.cmakeæ–‡ä»¶ä¸­(é€šå¸¸å°±å†™åœ¨å¼€å¤´çš„æè¿°é‡Œ)
 #find_package(OpenCV REQUIRED)
 #
 set(OpenCV_INCLUDE_DIRS

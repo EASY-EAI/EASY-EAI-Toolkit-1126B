@@ -39,7 +39,8 @@ set(media_root     ${toolkit_root}/media)
 # 包含各模块的 API 配置文件，这些文件定义了头文件路径、源文件路径和库文件
 include (${common_root}/system_opt/api.cmake)      # 系统基础功能模块
 include (${common_root}/data_queue/api.cmake)      # 数据队列模块
-include (${media_root}/lmo_adapter/api.cmake)    # LMO 媒体适配器模块
+include (${media_root}/lmo_adapter/api.cmake)      # LMO 媒体适配器模块
+include (${media_root}/aov/api.cmake)              # AOV 专用模块
 
 ## api头文件路径
 set(AOV_ADAPTER_DIR ${media_root}/lmo_adapter/aov)
@@ -114,8 +115,6 @@ endif()
 #pkg_check_modules(GST1.0_VIDEO REQUIRED gstreamer-video-1.0)
 
 # aov api 根目录（common/core/isp/power/platform/record/muxer/osd/media 已迁移至此）
-set(aov_api_root ${CMAKE_CURRENT_SOURCE_DIR}/../../easyeai-api/media/aov)
-include(${aov_api_root}/api.cmake)
 
 # -I
 set(custom_inc

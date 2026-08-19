@@ -36,7 +36,7 @@
 /* 宏定义 */
 #define BUF_COUNT       2
 
-#define FMT_TYPE_MAX_NUM 8 //每个camera最多[FMT_TYPE_MAX_NUM]种格式
+#define FMT_TYPE_MAX_NUM 16 //每个camera最多[FMT_TYPE_MAX_NUM]种格式
 #define RES_MAX_NUM 8  //每种格式最多[RES_MAX_NUM]种分辨率
 typedef struct {
     int width;
