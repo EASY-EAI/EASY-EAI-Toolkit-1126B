@@ -22,6 +22,18 @@
 
 重要更新：
 ---
+> 2026-08-22 :
+> * 发布 EASY-EAI-Toolkit-1126B-0.2.3
+> * 更新 easyeai-api
+>     * 通用组件api
+>         * [新增] 日志管理
+>     * 网络协议组件api
+>         * [新增] vcic
+> * 新增【Api单例】
+>     * [新增] netProtocol-vcic
+> * 更新【开发实例】
+>     * [更新] rtspIPCamera
+>
 > 2026-08-05 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.2.2
 > * 更新 easyeai-api

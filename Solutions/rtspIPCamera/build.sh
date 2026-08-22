@@ -12,6 +12,7 @@ warring() {
 	echo " "
 	echo "./build.sh       : build solution"
 	echo "./build.sh clear : clear all compiled files(just preserve source code)"
+	echo "./build.sh cpres  : build and copy all resources to board"
 	echo " "
 }
 
@@ -32,6 +33,11 @@ mkdir -p "../Release" && cp $CUR_DIR_NAME "../Release"
 chmod 777 ../Release -R
 
 ## copy to Board
-mkdir -p $SYSROOT/userdata/Solu/$CUR_DIR_NAME
-cp ../Release/* $SYSROOT/userdata/Solu/$CUR_DIR_NAME
-exit 0
+sudo mkdir -p $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+sudo mkdir -p $SYSROOT/userdata/logs
+if [ "$1" = "cpres" ]; then
+	sudo cp ../Release/* $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+	sudo cp ../../../easyeai-api/common/log_manager_pro/log $SYSROOT/userdata/Solu/$CUR_DIR_NAME/
+else
+	sudo cp ../Release/$CUR_DIR_NAME $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+fi

@@ -23,6 +23,18 @@ How to use：
 
 important update log:
 ---
+> 2026-08-22 :
+> * Release EASY-EAI-Toolkit-1126B-0.2.3
+> * update easyeai-api
+>     * common_api
+>         * [new] log_manager_pro
+>     * netProtocol_api
+>         * [new] vcic
+> * update Demo
+>     * [new] netProtocol-vcic
+> * update Solution
+>     * [update] rtspIPCamera
+>
 > 2026-08-05 :
 > * Release EASY-EAI-Toolkit-1126B-0.2.2
 > * update easyeai-api
