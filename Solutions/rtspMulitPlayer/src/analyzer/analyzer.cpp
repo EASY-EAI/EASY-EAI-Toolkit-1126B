@@ -1,75 +1,37 @@
 //=====================  C++  =====================
 #include <string>
 #include <list>
+#include <cstdio>
 //=====================   C   =====================
-#include "system.h"
+#include <unistd.h>
 //=====================  PRJ  =====================
 #include "system_opt.h"
-#include "log_manager.h"
+#include <rga/rga.h>
 #include "rga_wrapper.h"
 #include "display.h"
+#include "display_pro.h"
 
 #include "analyzer.h"
 
 using namespace cv;
 
+/* ======================== vChnObject（带 DMA-BUF） ======================== */
+typedef struct {
+    cv::Mat image;              /* 用于算法分析的 BGR888 Mat */
+    pthread_rwlock_t imgLock;
+    int chnId;
+    ChnResult_t chnResult;
 
-static Scalar colorArray[10]={
-    Scalar(0, 0, 255, 255),
-    Scalar(0, 255, 0, 255),
-    Scalar(139,0,0,255),
-    Scalar(0,100,0,255),
-    Scalar(0,139,139,255),
-    Scalar(0,206,209,255),
-    Scalar(255,127,0,255),
-    Scalar(72,61,139,255),
-    Scalar(0,255,0,255),
-    Scalar(0,0,255,255),
-};
-static int plot_one_box(Mat src, int x1, int x2, int y1, int y2, char *label, char colour)
-{
-    int tl = round(0.002 * (src.rows + src.cols) / 2) + 1;
-    rectangle(src, cv::Point(x1, y1), cv::Point(x2, y2), colorArray[(unsigned char)colour], 3);
+    /* DMA-BUF 零拷贝显示路径 */
+    int dmabuf_fd;             /* NV12 DMA-BUF fd */
+    int dma_width;
+    int dma_height;
+    int dma_horStride;
+    int dma_verStride;
+    pthread_rwlock_t dmaLock;  /* 保护 dmabuf_fd 字段 */
+} vChnObjectEx;
 
-    int tf = max(tl -1, 1);
-
-    int base_line = 0;
-    cv::Size t_size = getTextSize(label, FONT_HERSHEY_SIMPLEX, (float)tl/3, tf, &base_line);
-    int x3 = x1 + t_size.width;
-    int y3 = y1 - t_size.height - 3;
-
-    rectangle(src, cv::Point(x1, y1), cv::Point(x3, y3), colorArray[(unsigned char)colour], -1);
-    putText(src, label, cv::Point(x1, y1 - 2), FONT_HERSHEY_SIMPLEX, (float)tl/3, cv::Scalar(255, 255, 255, 255), tf, 8);
-    return 0;
-}
-static void paint_algorithm_result(Mat image, ChnResult_t result)
-{
-    // 把算法结果绘制在图像上
-    char text[256];
-    for (int algoIndex = 0; algoIndex < ALGOMAXNUM; algoIndex++){
-        for (int j = 0; j < result.algoRes[algoIndex].resNumber; j++) {
-            detect_result_t *det_result = &(result.algoRes[algoIndex].detect_Group.results[j]);
-            if( det_result->prop < 0.4) {
-                continue;
-            }
-            
-            // 标出识别目标框
-            sprintf(text, "%s %.1f%%", det_result->name, det_result->prop * 100);
-#if 0
-            printf("%s @ (%d %d %d %d) %f\n", det_result->name, det_result->box.left, det_result->box.top,
-                   det_result->box.right, det_result->box.bottom, det_result->prop);
-#endif
-            int x1 = det_result->box.left;
-            int y1 = det_result->box.top;
-            int x2 = det_result->box.right;
-            int y2 = det_result->box.bottom;
-            // 标出识别目标定位标记
-            plot_one_box(image, x1, x2, y1, y2, text, j%10);
-        }
-    }
-}
-
-
+/* ======================== Analyzer 类 ======================== */
 class Analyzer
 {
 public:
@@ -78,55 +40,40 @@ public:
 
     static Analyzer *instance() { return m_pSelf; }
     static void createAnalyzer(int32_t maxChn);
-    
-    // --视频资源处理
-    // 1.更新某路[视频]通道图像数据
-    int32_t upDateVideoChannel(int chnId, char *imgData, ImgDesc_t imgDesc);
-    // 2.取某路[视频]通道图像数据地址
-    vChnObject *getVideoChnObject(int chnId);
-    uint8_t* videoChannelData(vChnObject *pVideoObj, int &width, int &height);
-    // 3.取某路[视频]通道的分析结果
-    int32_t videoChannelAnalyRes(int chnId);
 
-    // --音频资源处理
-    // 1.更新某路[音频]通道数据
-    // 2.取某路[音频]通道数据地址
-    // 3.取某路[音频]通道的分析结果
-    
+    /* DMA-BUF 零拷贝接口 */
+    int32_t upDateDmaChannel(int chnId, DmaFrame_t frame);
+    /* 旧 CPU 内存接口（兼容保留） */
+    int32_t upDateVideoChannel(int chnId, char *imgData, ImgDesc_t imgDesc);
+
+    vChnObject *getVideoChnObject(int chnId);
+    int32_t videoChannelAnalyRes(int chnId);
 
     bool mAnalyzeThreadWorking;
     bool mDisplayThreadWorking;
     pthread_mutex_t mVideoChnLock;
-    //pthread_mutex_t mAudioChnLock;
     int32_t mMaxChnNum;
+
 protected:
-    vChnObject *createVideoChnObject(int32_t chnId, int32_t imgWidth, int32_t imgHeight);
-    int32_t releaseVideoChnObject(vChnObject *pObj);
+    vChnObjectEx *createVideoChnObjectEx(int32_t chnId, int32_t imgWidth, int32_t imgHeight);
+    int32_t releaseVideoChnObjectEx(vChnObjectEx *pObj);
     int32_t delAllVideoChannel();
 
-    //aChnObject *searchAudioChnObject(int chnId);
-    //aChnObject *createAudioChnObject();
-    //int32_t releaseAudioChnObject(aChnObject *pObj);
-    //int32_t delAllAudioChannel();
-
-    
 private:
     static Analyzer *m_pSelf;
-    
-    // 解码器输出数据 - RGB格式
-	std::list<vChnObject*> m_VideoChannellist;
-	//std::list<aChnObject*> m_MediaAudioChannellist;
-
+	std::list<vChnObjectEx*> m_VideoChannellist;
 	pthread_t mAnalyzeTid;
 	pthread_t mDisplayTid;
 };
 
+/* ======================== 分析线程 ======================== */
+/* 仅在需要做模型推理时，做一次 NV12 DMA-BUF → BGR888 RGA 转换。
+ * 显示路径不经过此线程，直接走 window_commit_pro 零拷贝。 */
 static void *imgAnalyze_thread(void *para)
 {
     Analyzer *pSelf = (Analyzer *)para;
 
     int chnId = 0;
-    Mat image;
     ChnResult_t result;
     pSelf->mAnalyzeThreadWorking = true;
     while(1){
@@ -134,142 +81,156 @@ static void *imgAnalyze_thread(void *para)
             msleep(5);
             break;
         }
-        
+
         if(NULL == pSelf){
             msleep(5);
             break;
         }
-        
+
         vChnObject *pVideoObj = pSelf->getVideoChnObject(chnId);
         if(pVideoObj){
-            // 取出待分析图像
+            /* 取出待分析图像（BGR888 Mat） */
+            Mat image;
             pthread_rwlock_rdlock(&pVideoObj->imgLock);
-            pVideoObj->image.copyTo(image);
+            if(!pVideoObj->image.empty())
+                pVideoObj->image.copyTo(image);
             pthread_rwlock_unlock(&pVideoObj->imgLock);
 
-            // 此步骤操作会比较耗时，因此在给pVideoObj->chnResult赋值时需要重新判断pVideoObj是否存在
-            result = algorithm_process(chnId, image);
-        }        
+            if(!image.empty()){
+                result = algorithm_process(chnId, image);
+            }
+        }
+
         pVideoObj = pSelf->getVideoChnObject(chnId);
         if(pVideoObj){
-            // 其实这里还是有可能会在切(不同分辨率)流时，会导致应用崩溃
             memcpy(&pVideoObj->chnResult, &result, sizeof(ChnResult_t));
         }
-        
+
         chnId++;
         chnId%=pSelf->mMaxChnNum;
         msleep(20);
     }
-    
+
     pthread_exit(NULL);
 }
 
+/* ======================== 显示线程（零拷贝） ======================== */
+/* 直接用 window_commit_pro 把 NV12 DMA-BUF fd 交给 display 库，
+ * 由 display 库内部做 RGA 硬件转换 + DRM commit。
+ * OSD 画框在 UI 层叠加（如需），不阻塞显示路径。 */
 static void *imgDisplay_thread(void *para)
 {
     Analyzer *pSelf = (Analyzer *)para;
 
-    disp_init();
-    // --无信号通道显示内容
+    /* 初始化 display pro（zero-copy 路径） */
+    screen_init();
+    int screenW = 0, screenH = 0, refresh = 0;
+    screen_info(&screenW, &screenH, &refresh);
+
+    display_t disp;
+    memset(&disp, 0, sizeof(disp));
+    disp.width = screenW;
+    disp.height = screenH;
+    disp_init_pro(&disp);
+
+    /* 创建全屏窗口 */
+    window_t win;
+    memset(&win, 0, sizeof(win));
+    win.zpos = 1;
+    win.win_x = 0;
+    win.win_y = 0;
+    win.win_w = screenW;
+    win.win_h = screenH;
+    int winChn = add_window_to(DISPLAY, &win);
+
     bool bShowNoSig = true;
-    Mat noSignal_img = imread("./noSignal.jpg", 1);
-    // --有信号通道显示设置
-    int videoDuration = 30;//秒
+    int videoDuration = 30; //秒
     int preTimeStamp = get_timeval_ms();
     int curTimeStamp = preTimeStamp;
-    
+
     int chnId = 0;
-    Mat image = Mat(1080/*height*/, 1920/*width*/, CV_8UC3);
-    ChnResult_t result;
     pSelf->mDisplayThreadWorking = true;
     while(1){
         if(!pSelf->mDisplayThreadWorking){
             msleep(5);
             break;
         }
-        
+
         if(NULL == pSelf){
             msleep(5);
             break;
         }
 
-        // 每隔videoDuration秒切换一次通道
         curTimeStamp = get_timeval_ms();
         if(videoDuration*1000 <= (curTimeStamp-preTimeStamp)){
             chnId++;
             chnId%=pSelf->mMaxChnNum;
-
             preTimeStamp = curTimeStamp;
         }
-        
+
         vChnObject *pVideoObj = pSelf->getVideoChnObject(chnId);
         if(pVideoObj){
-            Image srcImage, dstImage;
-            memset(&srcImage, 0, sizeof(srcImage));
-            memset(&dstImage, 0, sizeof(dstImage));
-            srcImage.fmt = RK_FORMAT_BGR_888;
-            srcImage.width = pVideoObj->image.cols;
-            srcImage.height = pVideoObj->image.rows;
-            srcImage.hor_stride = pVideoObj->image.cols;
-            srcImage.ver_stride = pVideoObj->image.rows;
-            srcImage.rotation = HAL_TRANSFORM_ROT_0;
-            srcImage.pBuf = (void *)pVideoObj->image.data;
-            dstImage.fmt = RK_FORMAT_BGR_888;
-            dstImage.width = image.cols;
-            dstImage.height = image.rows;
-            dstImage.hor_stride = image.cols;
-            dstImage.ver_stride = image.rows;
-            dstImage.rotation = HAL_TRANSFORM_ROT_0;
-            dstImage.pBuf = (void *)image.data;
-            pthread_rwlock_rdlock(&pVideoObj->imgLock);
-            // 用rga快速复制一份待显示图像
-            srcImg_ConvertTo_dstImg(&dstImage, &srcImage);
-            // 提取分析结果
-            memset(&result, 0, sizeof(ChnResult_t));
-            memcpy(&result, &pVideoObj->chnResult, sizeof(ChnResult_t));
-            pthread_rwlock_unlock(&pVideoObj->imgLock);
-            
-            // 绘制分析结果到待显示图像
-            paint_algorithm_result(image, result);
+            /* 取出 DMA-BUF fd */
+            vChnObjectEx *pEx = (vChnObjectEx *)pVideoObj;
+            int dmabuf_fd = -1, dmaW = 0, dmaH = 0, dmaHor = 0;
 
-            window_commit(image.data, image.cols, image.rows, HAL_TRANSFORM_ROT_270);
-            bShowNoSig = true;
-            
-        }else if(bShowNoSig){
-            window_commit(noSignal_img.data, noSignal_img.cols, noSignal_img.rows, HAL_TRANSFORM_ROT_270);
-            bShowNoSig = false;
+            pthread_rwlock_rdlock(&pEx->dmaLock);
+            dmabuf_fd = pEx->dmabuf_fd;
+            dmaW = pEx->dma_width;
+            dmaH = pEx->dma_height;
+            dmaHor = pEx->dma_horStride;
+            pthread_rwlock_unlock(&pEx->dmaLock);
+
+            if(dmabuf_fd >= 0 && dmaW > 0 && dmaH > 0){
+                /* 零拷贝：直接把 NV12 DMA-BUF fd 交给 display */
+                display_dmabuf_frame_t frame;
+                memset(&frame, 0, sizeof(frame));
+                frame.dmabuf_fd = dmabuf_fd;
+                frame.width = dmaW;
+                frame.height = dmaH;
+                frame.pitch_bytes = dmaHor;
+                frame.rotation = 0;
+                frame.rga_format = RK_FORMAT_YCbCr_420_SP; /* NV12 */
+
+                window_commit_pro(winChn, &frame);
+                window_refresh_pro();
+                bShowNoSig = true;
+            }else if(bShowNoSig){
+                /* 无信号时也刷新一次（黑屏） */
+                window_refresh_pro();
+                bShowNoSig = false;
+            }
         }
-        
+
         msleep(15);
     }
 
-    disp_exit();
+    if(winChn >= 0)
+        remove_window_from(DISPLAY, winChn);
+    disp_release_pro();
+    screen_exit();
     pthread_exit(NULL);
 }
 
+/* ======================== Analyzer 实现 ======================== */
 Analyzer *Analyzer::m_pSelf = NULL;
 Analyzer::Analyzer(int32_t maxChn) :
     mAnalyzeThreadWorking(false),
     mDisplayThreadWorking(false),
     mMaxChnNum(maxChn)
 {
-    /*初始化通道锁*/
     pthread_mutex_init(&mVideoChnLock, NULL);
-    //pthread_mutex_init(&mAudioChnLock, NULL);
-    
-    /*创建线程*/
+
     if(0 != CreateJoinThread(imgAnalyze_thread, this, &mAnalyzeTid)){
-        return ;
+        return;
     }
-    
     if(0 != CreateJoinThread(imgDisplay_thread, this, &mDisplayTid)){
-        return ;
+        return;
     }
 }
 Analyzer::~Analyzer()
 {
-    /*回收线程*/
-    // 1，等待取流线程跑起来
-    int timeOut_ms = 1000; //设置n(ms)超时，超时就不等了
+    int timeOut_ms = 1000;
     while(1){
         if(((true == mDisplayThreadWorking)&&(true == mAnalyzeThreadWorking))||(timeOut_ms <= 0)){
             break;
@@ -277,9 +238,7 @@ Analyzer::~Analyzer()
         timeOut_ms--;
         usleep(1000);
     }
-    // 2，退出线程并等待其结束
     mAnalyzeThreadWorking = false;
-    // --[等待分析线程结束]--
     while(1) {
         usleep(20*1000);
         int32_t exitCode = pthread_join(mAnalyzeTid, NULL);
@@ -287,21 +246,20 @@ Analyzer::~Analyzer()
             break;
         }else if(0 != exitCode){
             switch (exitCode) {
-                case ESRCH:  // 没有找到线程ID
-                    PRINT_ERROR("imgAnalyze_thread exit: No thread with the given ID was found.");
+                case ESRCH:
+                    fprintf(stderr, "imgAnalyze_thread exit: No thread with the given ID was found.\n");
                     break;
-                case EINVAL: // 线程不可连接或已经有其他线程在等待它
-                    PRINT_ERROR("imgAnalyze_thread exit: Thread is detached or already being waited on.");
+                case EINVAL:
+                    fprintf(stderr, "imgAnalyze_thread exit: Thread is detached or already being waited on.\n");
                     break;
-                case EDEADLK: // 死锁 - 线程尝试join自己
-                    PRINT_ERROR("imgAnalyze_thread exit: Deadlock detected - thread is trying to join itself.");
+                case EDEADLK:
+                    fprintf(stderr, "imgAnalyze_thread exit: Deadlock detected - thread is trying to join itself.\n");
                     break;
             }
             continue;
         }
     }
     mDisplayThreadWorking = false;
-    // --[等待显示线程结束]--
     while(1) {
         usleep(20*1000);
         int32_t exitCode = pthread_join(mDisplayTid, NULL);
@@ -309,27 +267,22 @@ Analyzer::~Analyzer()
             break;
         }else if(0 != exitCode){
             switch (exitCode) {
-                case ESRCH:  // 没有找到线程ID
-                    PRINT_ERROR("imgDisplay_thread exit: No thread with the given ID was found.");
+                case ESRCH:
+                    fprintf(stderr, "imgDisplay_thread exit: No thread with the given ID was found.\n");
                     break;
-                case EINVAL: // 线程不可连接或已经有其他线程在等待它
-                    PRINT_ERROR("imgDisplay_thread exit: Thread is detached or already being waited on.");
+                case EINVAL:
+                    fprintf(stderr, "imgDisplay_thread exit: Thread is detached or already being waited on.\n");
                     break;
-                case EDEADLK: // 死锁 - 线程尝试join自己
-                    PRINT_ERROR("imgDisplay_thread exit: Deadlock detected - thread is trying to join itself.");
+                case EDEADLK:
+                    fprintf(stderr, "imgDisplay_thread exit: Deadlock detected - thread is trying to join itself.\n");
                     break;
             }
             continue;
         }
     }
 
-    /*回收视频资源*/
     delAllVideoChannel();
     pthread_mutex_destroy(&mVideoChnLock);
-
-    /*回收音频资源*/
-    //delAllAudioChannel();
-    //pthread_mutex_destroy(&mAudioChnLock);
 }
 void Analyzer::createAnalyzer(int32_t maxChn)
 {
@@ -338,48 +291,121 @@ void Analyzer::createAnalyzer(int32_t maxChn)
    }
 }
 
+/* ======================== DMA-BUF 零拷贝更新 ======================== */
+int32_t Analyzer::upDateDmaChannel(int chnId, DmaFrame_t frame)
+{
+    if(chnId < 0)
+        return -1;
+
+    pthread_mutex_lock(&mVideoChnLock);
+    vChnObjectEx* targetObj = nullptr;
+    for (auto it = m_VideoChannellist.begin(); it != m_VideoChannellist.end(); ++it) {
+        if ((*it)->chnId == chnId) {
+            targetObj = *it;
+            /* 分辨率变化时重建 Mat */
+            if((targetObj->dma_width != frame.width)||(targetObj->dma_height != frame.height)){
+                if(0 == releaseVideoChnObjectEx(targetObj)){
+                    it = m_VideoChannellist.erase(it);
+                }else{
+                    pthread_mutex_unlock(&mVideoChnLock);
+                    return -2;
+                }
+                targetObj = nullptr;
+            }
+            break;
+        }
+    }
+
+    if (!targetObj) {
+        targetObj = createVideoChnObjectEx(chnId, frame.width, frame.height);
+        if(!targetObj)
+            return -3;
+        m_VideoChannellist.push_back(targetObj);
+    }
+    pthread_mutex_unlock(&mVideoChnLock);
+
+    /* 更新 DMA-BUF fd（显示路径零拷贝） */
+    pthread_rwlock_wrlock(&targetObj->dmaLock);
+    targetObj->dmabuf_fd = frame.dmabuf_fd;
+    targetObj->dma_width = frame.width;
+    targetObj->dma_height = frame.height;
+    targetObj->dma_horStride = frame.horStride;
+    targetObj->dma_verStride = frame.verStride;
+    pthread_rwlock_unlock(&targetObj->dmaLock);
+
+    /* 分析路径：做一次 NV12→BGR888 RGA 转换（仅用于模型推理） */
+    if(frame.dmabuf_fd >= 0){
+        size_t mapSize = (size_t)frame.horStride * frame.verStride * 3 / 2;
+        void *nv12Data = mmap(NULL, mapSize, PROT_READ, MAP_SHARED,
+                              frame.dmabuf_fd, 0);
+        if(nv12Data != MAP_FAILED){
+            Image srcImage, dstImage;
+            memset(&srcImage, 0, sizeof(srcImage));
+            memset(&dstImage, 0, sizeof(dstImage));
+            srcImage.fmt = RK_FORMAT_YCbCr_420_SP;
+            srcImage.width = frame.width;
+            srcImage.height = frame.height;
+            srcImage.hor_stride = frame.horStride;
+            srcImage.ver_stride = frame.verStride;
+            srcImage.rotation = HAL_TRANSFORM_ROT_0;
+            srcImage.fd = frame.dmabuf_fd;
+            srcImage.pBuf = nv12Data;
+
+            dstImage.fmt = RK_FORMAT_BGR_888;
+            dstImage.width = targetObj->image.cols;
+            dstImage.height = targetObj->image.rows;
+            dstImage.hor_stride = targetObj->image.cols;
+            dstImage.ver_stride = targetObj->image.rows;
+            dstImage.rotation = HAL_TRANSFORM_ROT_0;
+            dstImage.fd = -1;
+            dstImage.pBuf = (void *)targetObj->image.data;
+
+            pthread_rwlock_wrlock(&targetObj->imgLock);
+            srcImg_ConvertTo_dstImg(&dstImage, &srcImage);
+            pthread_rwlock_unlock(&targetObj->imgLock);
+
+            munmap(nv12Data, mapSize);
+        }
+    }
+
+    return 0;
+}
+
+/* 旧的 CPU 内存接口（兼容保留） */
 int32_t Analyzer::upDateVideoChannel(int chnId, char *imgData, ImgDesc_t imgDesc)
 {
     if(chnId < 0)
         return -1;
 
     pthread_mutex_lock(&mVideoChnLock);
-    vChnObject* targetObj = nullptr;
+    vChnObjectEx* targetObj = nullptr;
     for (auto it = m_VideoChannellist.begin(); it != m_VideoChannellist.end(); ++it) {
-        // 找到目标对象
         if ((*it)->chnId == chnId) {
-            targetObj = *it;  
-            
-            // 图像信息改变，销毁原来图像缓存
+            targetObj = *it;
             if((targetObj->image.cols != imgDesc.width)||(targetObj->image.rows != imgDesc.height)){
-                if(0 == releaseVideoChnObject(targetObj)){
-                    // 从链表中移除chnObj
+                if(0 == releaseVideoChnObjectEx(targetObj)){
                     it = m_VideoChannellist.erase(it);
                 }else{
                     pthread_mutex_unlock(&mVideoChnLock);
                     return -2;
                 }
+                targetObj = nullptr;
             }
-            
             break;
         }
     }
-    
-    // 需要创建一个[视频]通道对象
+
     if (!targetObj) {
-        targetObj = createVideoChnObject(chnId, imgDesc.width, imgDesc.height);
+        targetObj = createVideoChnObjectEx(chnId, imgDesc.width, imgDesc.height);
         if(!targetObj)
             return -3;
-        
         m_VideoChannellist.push_back(targetObj);
     }
     pthread_mutex_unlock(&mVideoChnLock);
 
-    // 更新[视频]通道图像数据
     Image srcImage, dstImage;
     memset(&srcImage, 0, sizeof(srcImage));
     memset(&dstImage, 0, sizeof(dstImage));
-    
     srcImage.fmt = rgaFmt(imgDesc.fmt);
     srcImage.width = imgDesc.width;
     srcImage.height = imgDesc.height;
@@ -387,7 +413,7 @@ int32_t Analyzer::upDateVideoChannel(int chnId, char *imgData, ImgDesc_t imgDesc
     srcImage.ver_stride = imgDesc.verStride;
     srcImage.rotation = HAL_TRANSFORM_ROT_0;
     srcImage.pBuf = imgData;
-    
+
     dstImage.fmt = RK_FORMAT_BGR_888;
     dstImage.width = targetObj->image.cols;
     dstImage.height = targetObj->image.rows;
@@ -395,7 +421,7 @@ int32_t Analyzer::upDateVideoChannel(int chnId, char *imgData, ImgDesc_t imgDesc
     dstImage.ver_stride = targetObj->image.rows;
     dstImage.rotation = HAL_TRANSFORM_ROT_0;
     dstImage.pBuf = (void *)targetObj->image.data;
-    
+
     pthread_rwlock_wrlock(&targetObj->imgLock);
     srcImg_ConvertTo_dstImg(&dstImage, &srcImage);
     pthread_rwlock_unlock(&targetObj->imgLock);
@@ -407,10 +433,9 @@ vChnObject *Analyzer::getVideoChnObject(int chnId)
     if(chnId < 0)
         return NULL;
 
-    vChnObject* targetObj = nullptr;
+    vChnObjectEx* targetObj = nullptr;
     pthread_mutex_lock(&mVideoChnLock);
     for (auto it = m_VideoChannellist.begin(); it != m_VideoChannellist.end(); ++it) {
-        // 找到目标对象
         if ((*it)->chnId == chnId) {
             targetObj = *it;
             break;
@@ -418,45 +443,46 @@ vChnObject *Analyzer::getVideoChnObject(int chnId)
     }
     pthread_mutex_unlock(&mVideoChnLock);
 
-    return targetObj;
+    /* vChnObjectEx 的前几个字段与 vChnObject 布局兼容
+     * (image, imgLock, chnId, chnResult) */
+    return (vChnObject *)targetObj;
 }
 
-
-vChnObject *Analyzer::createVideoChnObject(int32_t chnId, int32_t imgWidth, int32_t imgHeight)
+vChnObjectEx *Analyzer::createVideoChnObjectEx(int32_t chnId, int32_t imgWidth, int32_t imgHeight)
 {
-    // 1. 创建通道对象
-    vChnObject* newChnObj = new vChnObject;
+    vChnObjectEx* newChnObj = new vChnObjectEx;
     if(!newChnObj)
         return NULL;
-    
-    // 2. 初始化图像数据读写锁
+
     pthread_rwlock_init(&newChnObj->imgLock, nullptr);
-    
-    // 3. 创建图像缓存
+    pthread_rwlock_init(&newChnObj->dmaLock, nullptr);
+
     newChnObj->chnId = chnId;
     newChnObj->image = Mat(imgHeight, imgWidth, CV_8UC3, Scalar(0, 255, 0));
     memset(&newChnObj->chnResult, 0, sizeof(ChnResult_t));
-    
+
+    newChnObj->dmabuf_fd = -1;
+    newChnObj->dma_width = 0;
+    newChnObj->dma_height = 0;
+    newChnObj->dma_horStride = 0;
+    newChnObj->dma_verStride = 0;
+
     return newChnObj;
 }
 
-
-int32_t Analyzer::releaseVideoChnObject(vChnObject *pObj)
+int32_t Analyzer::releaseVideoChnObjectEx(vChnObjectEx *pObj)
 {
     if(NULL == pObj)
         return -1;
-    
-    // 1. 销毁Mat资源（OpenCV会自动管理）
+
     pthread_rwlock_wrlock(&pObj->imgLock);
     pObj->image.release();
     pthread_rwlock_unlock(&pObj->imgLock);
-    
-    // 2. 销毁读写锁
     pthread_rwlock_destroy(&pObj->imgLock);
-    
-    // 3. 销毁通道对象
+
+    pthread_rwlock_destroy(&pObj->dmaLock);
+
     delete pObj;
-    
     return 0;
 }
 
@@ -464,7 +490,7 @@ int32_t Analyzer::delAllVideoChannel()
 {
     pthread_mutex_lock(&mVideoChnLock);
     for (auto it = m_VideoChannellist.begin(); it != m_VideoChannellist.end(); ++it) {
-        if(0 == releaseVideoChnObject(*it)){
+        if(0 == releaseVideoChnObjectEx(*it)){
             it = m_VideoChannellist.erase(it);
         }
     }
@@ -472,26 +498,28 @@ int32_t Analyzer::delAllVideoChannel()
     return 0;
 }
 
-
+/* ======================== C 接口 ======================== */
 int analyzer_init(int32_t maxChn)
 {
-    // 创建图像分析器
     Analyzer::createAnalyzer(maxChn);
-    
-    // 模型初始化
     algorithm_init();
-
     return 0;
 }
 
 int videoOutHandle(char *imgData, ImgDesc_t imgDesc)
 {
     Analyzer *pAnalyzer = Analyzer::instance();
-
     if(pAnalyzer){
         pAnalyzer->upDateVideoChannel(imgDesc.chnId, imgData, imgDesc);
     }
-    
     return 0;
 }
 
+int videoDmaHandle(DmaFrame_t frame)
+{
+    Analyzer *pAnalyzer = Analyzer::instance();
+    if(pAnalyzer){
+        pAnalyzer->upDateDmaChannel(frame.chnId, frame);
+    }
+    return 0;
+}

@@ -32,9 +32,9 @@ mkdir -p "../Release" && cp $CUR_DIR_NAME "../Release"
 chmod 777 ../Release -R
 
 ## copy to Board
-mkdir -p $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+sudo mkdir -p $SYSROOT/userdata/Solu/$CUR_DIR_NAME
 if [ "$1" = "cpres" ]; then
-	cp ../Release/* $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+	sudo cp ../Release/* $SYSROOT/userdata/Solu/$CUR_DIR_NAME
 else
-	cp ../Release/$CUR_DIR_NAME $SYSROOT/userdata/Solu/$CUR_DIR_NAME
+	sudo cp ../Release/$CUR_DIR_NAME $SYSROOT/userdata/Solu/$CUR_DIR_NAME
 fi

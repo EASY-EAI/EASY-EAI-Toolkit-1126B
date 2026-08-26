@@ -13,32 +13,32 @@
 static const SrcCfg_t SrcCfg_tab[] = {
 	{
 		.srcType   = "rtsp",
-		.loaction  = "rtsp://admin:a12345678@192.168.5.66",
+		.loaction  = "rtsp://192.168.3.141:8554/live/0",
 		.videoEncType = "h264",
 		.audioEncType = "null",
-	}, {
-		.srcType   = "rtsp",
-		.loaction  = "rtsp://admin:a12345678@192.168.5.68",
-		.videoEncType = "h264",
-		.audioEncType = "null",
-/*
-	}, {
+	},
+	/* ── 以下为扩展配置示例，取消注释即可启用 ── */
+	/* 注意：当前仅支持视频画面显示，音频播放暂未支持 */
+#if 0
+	{	/* RTSP H264（带账号密码） */
 		.srcType   = "rtsp",
 		.loaction  = "rtsp://admin:a12345678@192.168.1.69",
 		.videoEncType = "h264",
-		.audioEncType = "null",
-	}, {
-        .srcType   = "rtsp",
-        .loaction  = "rtsp://192.168.3.101:554/aabb,
-        .videoEncType = "h265",
-        .audioEncType = "pcma",
-	}, { // *以下格式尚未研发完成，暂不投入使用
+		.audioEncType = "null",          /* 音频暂未支持 */
+	},
+	{	/* RTSP H265 */
+		.srcType   = "rtsp",
+		.loaction  = "rtsp://192.168.3.101:554/aabb",
+		.videoEncType = "h265",
+		.audioEncType = "pcma",           /* 音频暂未支持 */
+	},
+	{	/* 本地文件（暂未支持） */
 		.srcType   = "file",
 		.loaction  = "/userdata/mydata/car.mp4",
 		.videoEncType = "h264",
-		.audioEncType = "aac",
-*/
-    }
+		.audioEncType = "aac",            /* 音频暂未支持 */
+	},
+#endif
 };
 
 int main(int argc, char **argv)
@@ -65,9 +65,7 @@ int main(int argc, char **argv)
     }
 #endif
 
-    /* Initialize GStreamer */
-    gst_init(&argc, &argv);
-    
+    /* RTSP client + RK_MPI VDEC (no gstreamer needed) */
     Capturer *pCapturer[32] = {NULL};
     for(int i = 0; i <chnNums; i++) {
         pCapturer[i] = new Capturer(i, SrcCfg_tab[i]);
