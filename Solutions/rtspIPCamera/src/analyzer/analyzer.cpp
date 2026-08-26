@@ -2,7 +2,7 @@
 #include <string>
 #include <list>
 //=====================   C   =====================
-#include "system.h"
+#include <unistd.h>
 #include <sys/ioctl.h>
 //=====================  SDK  =====================
 #include "system_opt.h"

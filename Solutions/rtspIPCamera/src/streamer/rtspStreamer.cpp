@@ -59,6 +59,45 @@ int RtspStreamer::pushFrame(const uint8_t *data, int size, uint64_t timestamp)
     return RtspServer_PushFrame((RtspServer*)mServer, data, size, timestamp);
 }
 
+void RtspStreamer::setParamSets(const uint8_t *vps, int vpsSize,
+                                 const uint8_t *sps, int spsSize,
+                                 const uint8_t *pps, int ppsSize)
+{
+    if (!mInited || !mServer) {
+        PRINT_ERROR(g_hRtsp, "setParamSets: server not initialized\n");
+        return;
+    }
+
+    RtspServer_SetParamSets((RtspServer*)mServer,
+                            vps, vpsSize,
+                            sps, spsSize,
+                            pps, ppsSize);
+    PRINT_INFO(g_hRtsp, "ParamSets set: vps=%d sps=%d pps=%d\n",
+           vpsSize, spsSize, ppsSize);
+}
+
+int RtspStreamer::getClientCount()
+{
+    if (!mInited || !mServer) return 0;
+    return RtspServer_GetClientCount((RtspServer*)mServer);
+}
+
+void RtspStreamer::getStats(uint64_t &framesPushed, uint64_t &bytesSent,
+                            uint64_t &rtpPacketsSent)
+{
+    framesPushed = 0;
+    bytesSent = 0;
+    rtpPacketsSent = 0;
+    if (!mInited || !mServer) return;
+
+    RtspServerStats stats;
+    memset(&stats, 0, sizeof(stats));
+    RtspServer_GetStats((RtspServer*)mServer, &stats);
+    framesPushed = stats.frames_pushed;
+    bytesSent = stats.bytes_sent;
+    rtpPacketsSent = stats.rtp_packets_sent;
+}
+
 void RtspStreamer::deinit()
 {
     if (mServer) {

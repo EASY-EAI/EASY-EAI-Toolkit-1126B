@@ -68,7 +68,6 @@ set(custom_inc
     ${CMAKE_SYSROOT}/usr/include/drm
     ${CMAKE_SYSROOT}/usr/include/opencv4/
     ${CMAKE_SYSROOT}/usr/include/rk/
-    ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/src/capturer
     ${PROJECT_SOURCE_DIR}/src/analyzer

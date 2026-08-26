@@ -1,7 +1,7 @@
 //=====================  C++  =====================
 #include <string>
 //=====================   C   =====================
-#include "system.h"
+#include <unistd.h>
 //=====================  PRJ  =====================
 #include "logHandle.h"
 #include "algoProcess.h"
