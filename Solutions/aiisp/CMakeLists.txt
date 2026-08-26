@@ -38,6 +38,7 @@ include (${media_root}/lmo_adapter/api.cmake)
 set(api_inc
     ${SYSOPT_INCLUDE_DIRS}
     ${CAMERA_ADAPTER_INCLUDE_DIRS}
+    ${CMAKE_SYSROOT}/usr/include/rk
     )
 
 file(GLOB api_srcs
@@ -75,6 +76,7 @@ link_directories(
 set(custom_libs
     rga
     rtsp
+    rockit
 )
 # source code
 aux_source_directory(./src dir_srcs)

@@ -32,6 +32,7 @@ set(api_inc
     ${SYSOPT_INCLUDE_DIRS}
     ${CAMERA_ADAPTER_INCLUDE_DIRS}
     ${RTSP_SERVER_INCLUDE_DIRS}
+    ${CMAKE_SYSROOT}/usr/include/rk
     )
 file(GLOB api_srcs
     ${SYSOPT_SOURCE_DIRS}
@@ -45,6 +46,7 @@ set(sysLib_list
     ${CAMERA_ADAPTER_LIBS}
     ${RTSP_SERVER_LIBS}
     rtsp
+    rockit
     )
 # ======================== easyeai_api =========================
 

@@ -120,6 +120,7 @@ endif()
 set(custom_inc
     ./src/app
     ${AOV_INCLUDE_DIRS}
+    ${CMAKE_SYSROOT}/usr/include/rk
 )
 # -L
 link_directories(
@@ -131,6 +132,7 @@ link_directories(
 set(custom_libs
     rga
     rtsp
+    rockit
     #${OpenCV_LIBS}
     #${GTK3_LIBRARIES}
     #${GST1.0_LIBRARIES}
