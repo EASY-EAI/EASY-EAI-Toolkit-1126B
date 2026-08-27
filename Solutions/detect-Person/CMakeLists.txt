@@ -74,7 +74,6 @@ set(sysLib_list
 # solution project
 # -I
 set(custom_inc 
-    ${CMAKE_SYSROOT}/usr/include/drm
 )
 # -L
 #link_directories(
@@ -84,7 +83,6 @@ set(custom_inc
 #)
 # -l
 set(custom_libs
-    drm
     rga 
     #opencv_core 
     #opencv_imgproc 

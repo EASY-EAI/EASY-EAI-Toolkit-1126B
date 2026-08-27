@@ -110,7 +110,6 @@ set(sysLib_list
 # -I
 set(custom_inc
     ${CMAKE_SYSROOT}/usr/include/ 
-    ${CMAKE_SYSROOT}/usr/include/drm 
     ${CMAKE_SYSROOT}/usr/include/opencv4/ 
     #${GTK3_INCLUDE_DIRS} 
     #${GST1.0_INCLUDE_DIRS} 
@@ -126,7 +125,6 @@ link_directories(
 )
 # -l
 set(custom_libs
-    drm 
     rga 
     opencv_core 
     opencv_imgproc 

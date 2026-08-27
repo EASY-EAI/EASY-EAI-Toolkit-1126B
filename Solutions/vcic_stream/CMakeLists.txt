@@ -84,5 +84,4 @@ target_link_libraries(${demoTag}
 target_include_directories(${demoTag} PRIVATE
     ${api_inc}
     src/client
-    ${CMAKE_SYSROOT}/usr/include/drm
     )

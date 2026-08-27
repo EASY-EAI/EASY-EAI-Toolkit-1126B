@@ -65,7 +65,6 @@ set(sysLib_list
 # -I
 set(custom_inc
     ${CMAKE_SYSROOT}/usr/include/
-    ${CMAKE_SYSROOT}/usr/include/drm
     ${CMAKE_SYSROOT}/usr/include/opencv4/
     ${CMAKE_SYSROOT}/usr/include/rk/
     ${PROJECT_SOURCE_DIR}/src
@@ -80,7 +79,6 @@ link_directories(
     )
 # -l
 set(custom_libs
-    drm
     rga
     opencv_core
     opencv_imgproc
