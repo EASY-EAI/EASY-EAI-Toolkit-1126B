@@ -39,6 +39,7 @@ set(media_root     ${toolkit_root}/media)
 # 包含各模块的 API 配置文件，这些文件定义了头文件路径、源文件路径和库文件
 include (${common_root}/system_opt/api.cmake)      # 系统基础功能模块
 include (${common_root}/data_queue/api.cmake)      # 数据队列模块
+include (${common_root}/log_manager_pro/api.cmake) # 日志管理模块
 include (${media_root}/lmo_adapter/api.cmake)      # LMO 媒体适配器模块
 include (${media_root}/aov/api.cmake)              # AOV 专用模块
 
@@ -48,7 +49,7 @@ set(api_inc
     ${AOV_ADAPTER_DIR}              # AOV 专用通用接口（需在 common/ 前面）
     ${SYSOPT_INCLUDE_DIRS}          # 系统基础功能模块头文件路径
     ${DQUEUE_INCLUDE_DIRS}          # 数据队列模块头文件路径
-    ${LOGMANAGER_INCLUDE_DIRS}      # 日志管理模块头文件路径
+    ${LOGMANAGER_PRO_INCLUDE_DIRS}   # 日志管理模块头文件路径
     ${CAMERA_ADAPTER_INCLUDE_DIRS}  # 摄像头适配器模块头文件路径
     )
 ## api源文件路径
@@ -63,12 +64,13 @@ file(GLOB api_srcs
 list(FILTER api_srcs EXCLUDE REGEX "common/sample_comm\\.c$")
 ## api静态库文件路径
 link_directories(
+    ${LOGMANAGER_PRO_LIBS_DIRS}     # 日志管理模块库文件路径
     )
 ## api所依赖的库参数
 set(sysLib_list
     ${SYSOPT_LIBS}                  # 系统基础功能模块依赖库
     ${DQUEUE_LIBS}                  # 数据队列模块依赖库
-    ${LOGMANAGER_LIBS}              # 日志管理模块依赖库
+    ${LOGMANAGER_PRO_LIBS}          # 日志管理模块依赖库
     ${CAMERA_ADAPTER_LIBS}          # 摄像头适配器模块依赖库
     )
 # ======================== easyeai_api =========================
@@ -126,7 +128,7 @@ set(custom_inc
 link_directories(
    #${PROJECT_SOURCE_DIR}/libs
    ${CMAKE_SYSROOT}/usr/lib
-   ${common_root}/log_manager
+   ${LOGMANAGER_PRO_LIBS_DIRS}
 )
 # -l
 set(custom_libs

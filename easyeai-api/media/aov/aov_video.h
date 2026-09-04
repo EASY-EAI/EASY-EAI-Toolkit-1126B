@@ -32,7 +32,7 @@ typedef enum {
 typedef enum {
     AOV_VIDEO_BACKEND_SPLICE     = 0, /* 拼接模式 */
     AOV_VIDEO_BACKEND_SPLICE_AVS = 1, /* AVS 硬件拼接模式 */
-    AOV_VIDEO_BACKEND_MUTLI      = 2, /* 多目非拼接模式 */
+    AOV_VIDEO_BACKEND_MULTI      = 2, /* 多目非拼接模式 */
 } AOV_VIDEO_BACKEND_E;
 
 /* AVS 拼接模式（仅拼接后端使用） */
@@ -74,23 +74,33 @@ typedef struct {
     unsigned short max_framesize;  /* 最大帧尺寸 */
 } AOV_VENC_RC_PARAM_T;
 
-#define AOV_VIDEO_FRAME_SLICE_MAX 8   /* 单帧最多 slice 数 */
-
-/** @brief 帧数据切片 */
+/** @brief 通用视频帧
+ *
+ * frame_type 区分两种帧类型，对应 union 的两个成员:
+ *   'I'/'P'/'B' — 编码帧，使用 enc 成员
+ *   'Y'         — YUV 原始帧，使用 yuv 成员
+ *
+ * 两种帧类型互斥，不应同时赋值。
+ */
 typedef struct {
-    unsigned int size;
-    void        *data;
-} AOV_VIDEO_DATA_SLICE_T;
-
-/** @brief 通用视频帧 */
-typedef struct {
-    unsigned char      frame_type; /* 帧类型: 'I' / 'P' / 'B' */
+    unsigned char      frame_type; /* 帧类型: 'I'/'P'/'B' = 编码帧, 'Y' = YUV原始帧 */
     unsigned int       data_size;  /* 数据总大小（字节） */
     unsigned long long pts;        /* 时间戳 (us) */
-    unsigned char      slice_cnt;  /* slice 数量，0 = 整帧模式 */
     union {
-        void                  *data_vaddr;               /* 整帧虚拟地址 */
-        AOV_VIDEO_DATA_SLICE_T slices[AOV_VIDEO_FRAME_SLICE_MAX]; /* 切片列表 */
+        /* ---- 编码帧 (frame_type == 'I'/'P'/'B') ---- */
+        struct {
+            void *data_vaddr; /* 编码数据虚拟地址 */
+        } enc;
+
+        /* ---- YUV 原始帧 (frame_type == 'Y') ---- */
+        struct {
+            void          *data_vaddr; /* YUV 数据虚拟地址 */
+            void          *mb_blk;     /* 硬件 DMA 缓冲句柄 (MB_BLK) */
+            unsigned int   width;      /* 帧宽度 (像素) */
+            unsigned int   height;     /* 帧高度 (像素) */
+            unsigned int   vir_width;  /* 虚拟宽度 / stride (像素) */
+            unsigned int   vir_height; /* 虚拟高度 (像素) */
+        } yuv;
     };
 } AOV_VIDEO_FRAME_T;
 
@@ -132,7 +142,7 @@ typedef int (*VIDEO_GET_RAW_DATA)(unsigned char schn, unsigned char vchn,
  * @brief 选择视频后端模式
  *
  * 必须在 aov_isp_init() 之后、所有其他 aov_video_* 之前调用。
- * @param backend 后端模式 (SPLICE / SPLICE_AVS / MUTLI)
+ * @param backend 后端模式 (SPLICE / SPLICE_AVS / MULTI)
  */
 void aov_video_func_init(AOV_VIDEO_BACKEND_E backend);
 
@@ -220,7 +230,7 @@ void aov_video_aov_info_clear(void);
  * @param data_len  JPEG 数据长度（字节）
  * @return 0 成功，负值失败
  */
-int  aov_video_hardware_mjpeg_save_file(char *file_path, unsigned char *data, int data_len);
+int  aov_video_hardware_mjpeg_save_file(const char *file_path, const unsigned char *data, int data_len);
 
 #ifdef __cplusplus
 }

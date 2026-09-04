@@ -14,6 +14,35 @@
 #define AOV_MAX_FRAME_PER_SESSION 10 /* 每个唤醒周期最大帧数 */
 
 /*
+ * 录像配置默认值宏
+ *
+ * 用法: AOV_RECORD_CFG_T cfg = AOV_RECORD_CFG_DEFAULT("/tmp", "front_main");
+ * 用户可在初始化后按需覆盖个别字段。
+ */
+#define AOV_RECORD_CFG_DEFAULT(_dir, _name) { \
+    .output_dir          = (_dir), \
+    .file_name           = (_name), \
+    .video_width         = 1920, \
+    .video_height        = 1080, \
+    .fps                 = 15, \
+    .gop_size            = 15, \
+    .video_kbps          = 2048, \
+    .audio_enable        = 0, \
+    .audio_sample_rate   = 48000, \
+    .audio_channels      = 1, \
+    .audio_samples_per_frame = 1024, \
+    .max_frames          = AOV_MAX_FRAME_PER_SESSION, \
+    .encode_type         = 0, /* H.264 */ \
+    .record_fps          = 15, \
+    .aov_frame_duration_us = 1000000, /* 1 秒 */ \
+    .skip_initial_frames = 0, \
+    .venc_chn            = 0, \
+    .on_need_idr         = NULL, \
+    .idr_userdata        = NULL, \
+    .container_format    = {0}, \
+}
+
+/*
  * 首帧非 I 帧回调 — 录像文件刚创建但首帧不是关键帧时触发。
  * 用户应在回调中请求 VENC 立即生成 IDR。
  *
@@ -125,23 +154,11 @@ void aov_record_reset(AOV_RECORD_CTX_T* ctx);
  *     aov_video_request_idr_frame(vchn);
  * }
  *
- * // 2. 初始化录像上下文
- * AOV_RECORD_CFG_T cfg = {0};
- * snprintf(cfg.output_dir, sizeof(cfg.output_dir), "/tmp");
- * snprintf(cfg.file_name,  sizeof(cfg.file_name),  "front_main");
- * cfg.video_width  = 1920;
- * cfg.video_height = 1080;
- * cfg.fps          = 15;
- * cfg.gop_size     = 15;
- * cfg.video_kbps   = 2048;
+ * // 2. 初始化录像上下文（使用默认值宏，按需覆盖）
+ * AOV_RECORD_CFG_T cfg = AOV_RECORD_CFG_DEFAULT("/tmp", "front_main");
  * cfg.encode_type  = 0;          // 0=H.264, 1=H.265
- * cfg.record_fps   = cfg.fps;
- * cfg.aov_frame_duration_us = 1000000; // AOV 单帧按 1 秒 1 帧播放
- * cfg.max_frames   = 10;         // 每个文件帧数上限
- * cfg.venc_chn     = 0;
  * cfg.on_need_idr  = on_need_idr;
- * cfg.idr_userdata = NULL;
- * cfg.audio_enable = 0;          // 纯视频
+ * cfg.venc_chn     = 0;
  *
  * AOV_RECORD_CTX_T *ctx = aov_record_init(&cfg);
  * if (!ctx) {

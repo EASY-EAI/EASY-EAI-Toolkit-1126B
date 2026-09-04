@@ -81,6 +81,21 @@ typedef struct {
 } aov_action_t;
 
 /* ==================================================================
+ * 退出 / 唤醒控制枚举
+ * ================================================================== */
+
+/*
+ * AOV 退出策略
+ *
+ * 用于 aov_exit_set() 的 action 参数，替代旧的 int 三态语义。
+ */
+typedef enum {
+    AOV_EXIT_ENTER_NOW    = 0,  /* 立即进入 AOV 模式 */
+    AOV_EXIT_TIMING       = 1,  /* 退出 AOV，保持 sec 秒后自动重新进入 */
+    AOV_EXIT_FOREVER      = 2,  /* 永久退出 AOV，直到下一次调用 aov_exit_set() */
+} aov_exit_action_e;
+
+/* ==================================================================
  * 公开接口
  * ================================================================== */
 
@@ -90,9 +105,11 @@ typedef struct {
  * 注册回调与唤醒配置，初始化完成后自动进入 AOV 模式。
  *
  * @note  非线程安全，应在主线程调用且仅调用一次。
- * @param action  回调函数集及保活 / 唤醒配置
+ * @param action  回调函数集及保活 / 唤醒配置（指针传递，内部拷贝）
+ * @return 0 成功，非 0 失败（AOV_ERR_NOT_READY 状态机初始化失败，
+ *         AOV_ERR_FAILED 线程创建失败）
  */
-void aov_init(aov_action_t action);
+int aov_init(const aov_action_t *action);
 
 /*
  * AOV 反初始化
@@ -110,27 +127,64 @@ void aov_deinit(void);
 void aov_wait_exit(void);
 
 /*
- * 获取当前 AOV 运行状态（可选超时等待退出）
+ * 获取当前 AOV 运行状态（非阻塞，立即返回）
  *
  * 调用方可据此选择录像模式（AOV_STATUS_ACTIVE → 单帧，IDLE → 连续帧）
  * 或判断是否可以安全执行截图等非 AOV 操作。
  *
- * @param timeout_ms  超时等待（毫秒）：
- *                     0  — 立即返回当前状态
- *                    >0  — 等待最多 timeout_ms 毫秒直至 AOV_STATUS_IDLE
- *                    <0  — 无限阻塞直至 AOV_STATUS_IDLE
  * @return 当前 AOV 状态
  */
-aov_status_e aov_status_get(int timeout_ms);
+aov_status_e aov_status_get(void);
+
+/*
+ * 等待 AOV 退出到 IDLE 状态（阻塞，带超时）
+ *
+ * 调用方可据此等待 AOV 完全退出后再执行非 AOV 操作。
+ *
+ * @param timeout_ms  超时等待（毫秒）：
+ *                    >0  — 等待最多 timeout_ms 毫秒直至 AOV_STATUS_IDLE
+ *                    <0  — 无限阻塞直至 AOV_STATUS_IDLE
+ * @return AOV_STATUS_IDLE 已退出，AOV_STATUS_ACTIVE 超时仍处于 AOV 模式
+ */
+aov_status_e aov_status_wait_idle(int timeout_ms);
 
 /*
  * 退出 / 唤醒控制
  *
- *   sec > 0:  退出 AOV，保持 sec 秒后自动重新进入
- *   sec == 0: 立即进入 AOV 模式
- *   sec < 0:  永久退出 AOV，直到下一次调用 aov_exit_set() 为止
+ * @param action  退出策略（见 aov_exit_action_e 枚举）
+ * @param sec     当 action == AOV_EXIT_TIMING 时，保持 sec 秒后重新进入；
+ *               其他策略下忽略此参数
  */
-void aov_exit_set(int sec);
+void aov_exit_set(aov_exit_action_e action, int sec);
+
+/* ==================================================================
+ * 初始化调用顺序
+ * ==================================================================
+ *
+ * 使用 AOV 模块需按以下顺序调用各接口（跨多个头文件）：
+ *
+ *   1. aov_isp_init()          — ISP 初始化（必须在 RK_MPI_SYS_Init 之前）
+ *                                见 aov_isp.h
+ *   2. RK_MPI_SYS_Init()       — RK 系统初始化
+ *   3. aov_video_func_init()   — 选择视频后端 (SPLICE / SPLICE_AVS / MULTI)
+ *                                见 aov_video.h
+ *   4. aov_video_vi_init()     — VI + AVS 管线初始化
+ *   5. aov_video_venc_init()   — VENC 编码通道初始化（可多次调用，每通道一次）
+ *   6. aov_video_venc_start() — 启动编码线程，注册回调
+ *   7. aov_init()              — AOV 调度启动（本文件）
+ *   8. ... 运行期间通过 aov_exit_set / aov_status_get 控制状态 ...
+ *   9. aov_deinit()             — AOV 反初始化
+ *  10. aov_video_venc_stop()   — 停止编码
+ *  11. aov_video_venc_uninit() — VENC 反初始化
+ *  12. aov_video_vi_uninit()   — VI 管线反初始化
+ *  13. aov_isp_deinit()        — ISP 反初始化
+ *
+ * 录像相关接口 (aov_record.h) 不依赖上述顺序，可在步骤 6 之后
+ * 任意时机创建录像上下文。
+ *
+ * 休眠唤醒辅助接口 (aov_helper.h) 应在 aov_init() 之后、
+ * 进入 AOV 调度循环之前调用。
+ * ================================================================== */
 
 #ifdef __cplusplus
 }

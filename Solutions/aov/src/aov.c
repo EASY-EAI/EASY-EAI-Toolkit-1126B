@@ -2,7 +2,7 @@
  * user_splice.c — AOV 应用层 Demo（拼接 / 非拼接运行时选择）
  *
  * 默认使用 AOV_VIDEO_BACKEND_SPLICE_AVS 后端：双 sensor 经 AVS 硬件水平拼接后
- * 送入 VENC。传入 mutli/multi 参数时使用 AOV_VIDEO_BACKEND_MUTLI 后端：
+ * 送入 VENC。传入 multi 参数时使用 AOV_VIDEO_BACKEND_MULTI 后端：
  * 双 sensor 独立 VI 通道直连 VENC，不做拼接。
  *
  * 演示 AOV 接口的完整测试流程：
@@ -121,7 +121,7 @@ static int g_peripherals_unbound = 0;
 
 typedef enum {
     USER_BACKEND_SPLICE = 0,
-    USER_BACKEND_MUTLI  = 1,
+    USER_BACKEND_MULTI  = 1,
 } USER_BACKEND_MODE_E;
 
 static USER_BACKEND_MODE_E g_user_backend = USER_BACKEND_SPLICE;
@@ -212,13 +212,9 @@ static int user_is_backend_arg(const char *arg)
            strcmp(arg, "--splice") == 0 ||
            strcmp(arg, "backend:splice") == 0 ||
            strcmp(arg, "--backend=splice") == 0 ||
-           strcmp(arg, "mutli") == 0 ||
            strcmp(arg, "multi") == 0 ||
-           strcmp(arg, "--mutli") == 0 ||
            strcmp(arg, "--multi") == 0 ||
-           strcmp(arg, "backend:mutli") == 0 ||
            strcmp(arg, "backend:multi") == 0 ||
-           strcmp(arg, "--backend=mutli") == 0 ||
            strcmp(arg, "--backend=multi") == 0;
 }
 
@@ -235,15 +231,11 @@ static void user_parse_backend_args(int argc, char *argv[])
             strcmp(arg, "backend:splice") == 0 ||
             strcmp(arg, "--backend=splice") == 0) {
             g_user_backend = USER_BACKEND_SPLICE;
-        } else if (strcmp(arg, "mutli") == 0 ||
-                   strcmp(arg, "multi") == 0 ||
-                   strcmp(arg, "--mutli") == 0 ||
+        } else if (strcmp(arg, "multi") == 0 ||
                    strcmp(arg, "--multi") == 0 ||
-                   strcmp(arg, "backend:mutli") == 0 ||
                    strcmp(arg, "backend:multi") == 0 ||
-                   strcmp(arg, "--backend=mutli") == 0 ||
                    strcmp(arg, "--backend=multi") == 0) {
-            g_user_backend = USER_BACKEND_MUTLI;
+            g_user_backend = USER_BACKEND_MULTI;
         }
     }
 }
@@ -438,7 +430,7 @@ static void record_recover_sd_storage(void)
 {
     printf("[USER] SD storage I/O error, remount %s\n", REC_OUTPUT_MOUNT);
     record_sd_umount();
-    Aov_BindSdcard();
+    aov_helper_bind_sdcard();
 }
 
 static int record_prepare_sd_storage(int verbose)
@@ -748,7 +740,7 @@ static void record_drain_stop(void)
 
 static int user_venc_chn_id(int schn, int vchn)
 {
-    if (g_user_backend == USER_BACKEND_MUTLI)
+    if (g_user_backend == USER_BACKEND_MULTI)
         return schn * REC_CHN_MAX + vchn;
 
     /* AVS 拼接后端当前 VENC 映射: main=0, sub=1 */
@@ -824,9 +816,9 @@ static int user_osd_init_all(void)
     }
 
     g_osd_ready = 1;
-    user_osd_show_all(aov_status_get(0) == AOV_STATUS_ACTIVE);
+    user_osd_show_all(aov_status_get() == AOV_STATUS_ACTIVE);
     printf("[USER] osd init done, aov mark %s\n",
-           (aov_status_get(0) == AOV_STATUS_ACTIVE) ? "shown" : "hidden");
+           (aov_status_get() == AOV_STATUS_ACTIVE) ? "shown" : "hidden");
     return AOV_ERR_SUCCESS;
 }
 
@@ -879,13 +871,13 @@ static void restore_peripherals(void)
 
     printf("[USER] restoring peripherals...\n");
 
-    Aov_EnableNonBootCPUs();
-    Aov_EnableUSB();
-    Aov_BindEthernet();
-    Aov_BindSoundcard();
-    Aov_BindSDIO();
-    Aov_LoadWifiModules();
-    Aov_BindSdcard();
+    aov_helper_enable_nonboot_cpus();
+    aov_helper_enable_usb();
+    aov_helper_bind_ethernet();
+    aov_helper_bind_soundcard();
+    aov_helper_bind_sdio();
+    aov_helper_load_wifi_modules();
+    aov_helper_bind_sdcard();
     if (record_wait_sd_storage(5000) == 0) {
         record_resume_all_io();
         record_set_sd_ready(1);
@@ -935,14 +927,14 @@ int user_aov_enter_action(void)
      *   6. 解绑 Ethernet/gmac (避免 PM resume 重初始化 PHY/MAC)
      *   7. 关闭非引导 CPU 核 (cpu2/cpu3) 降漏电
      */
-    Aov_UnloadWifiModules();
+    aov_helper_unload_wifi_modules();
     record_sd_umount();
-    Aov_UnbindSdcard();
-    Aov_UnbindSDIO();
-    Aov_UnbindSoundcard();
-    Aov_DisableUSB();
-    Aov_UnbindEthernet();
-    Aov_DisableNonBootCPUs();
+    aov_helper_unbind_sdcard();
+    aov_helper_unbind_sdio();
+    aov_helper_unbind_soundcard();
+    aov_helper_disable_usb();
+    aov_helper_unbind_ethernet();
+    aov_helper_disable_nonboot_cpus();
 
     g_peripherals_unbound = 1;
 
@@ -998,7 +990,7 @@ int user_aov_write_event(void)
     int usage = aov_record_queue_usage_percent(g_record_queue);
     if (usage >= REC_QUEUE_WAKE_WATERMARK) {
         printf("[USER] queue usage %d%%, request AOV exit for SD drain\n", usage);
-        aov_exit_set(30);
+        aov_exit_set(AOV_EXIT_TIMING, 30);
     }
 
     record_signal_drain();
@@ -1017,7 +1009,7 @@ int user_aov_write_event(void)
 
 static int user_venc_data_cb(unsigned char schn, unsigned char vchn, AOV_VIDEO_FRAME_T* frame)
 {
-    if (!frame || !frame->data_vaddr) {
+    if (!frame || !frame->enc.data_vaddr) {
         printf("[USER] frame or data is NULL\n");
         return -1;
     }
@@ -1026,19 +1018,13 @@ static int user_venc_data_cb(unsigned char schn, unsigned char vchn, AOV_VIDEO_F
         return 0;
 
     /* 区分单帧/连续帧模式：AOV 模式=单帧，非 AOV=连续帧 */
-    aov_status_e status = aov_status_get(0);
+    aov_status_e status = aov_status_get();
     int midx = (status == AOV_STATUS_ACTIVE) ? REC_MODE_SINGLE : REC_MODE_MULTI;
-
-    if (frame->slice_cnt != 0) {
-        printf("[USER] drop sliced encoded frame: d%d c%d slices=%u\n",
-               schn, vchn, frame->slice_cnt);
-        return 0;
-    }
 
     int ret = aov_record_queue_push(g_record_queue,
                                     schn, vchn, (unsigned char)midx,
                                     frame->frame_type, frame->pts,
-                                    (const unsigned char*)frame->data_vaddr,
+                                    (const unsigned char*)frame->enc.data_vaddr,
                                     frame->data_size);
     if (ret != 0) {
         g_record_drop_log_cnt++;
@@ -1057,7 +1043,7 @@ static int user_venc_data_cb(unsigned char schn, unsigned char vchn, AOV_VIDEO_F
         }
         if (midx == REC_MODE_SINGLE &&
             aov_record_queue_usage_percent(g_record_queue) >= REC_QUEUE_WAKE_WATERMARK) {
-            aov_exit_set(30);
+            aov_exit_set(AOV_EXIT_TIMING, 30);
         }
         return -1;
     }
@@ -1092,7 +1078,7 @@ static int build_video_pipeline(void)
     if (g_user_backend == USER_BACKEND_SPLICE)
         aov_video_func_init(AOV_VIDEO_BACKEND_SPLICE_AVS);
     else
-        aov_video_func_init(AOV_VIDEO_BACKEND_MUTLI);
+        aov_video_func_init(AOV_VIDEO_BACKEND_MULTI);
 
     /* Step 2: VI 初始化 */
     AOV_SPLICE_MULTI_ATTR_T vi_attr;
@@ -1176,9 +1162,9 @@ static void destroy_video_pipeline(void)
  *
  * 支持的动作:
  *   wait:N 或 w:N        等待 N 秒
- *   enter 或 e           立即进入 AOV (aov_exit_set(0))
- *   exit_forever 或 ef   永久退出 AOV (aov_exit_set(-1))
- *   exit_timed:N 或 et:N 退出 AOV N 秒后自动重入 (aov_exit_set(N))
+ *   enter 或 e           立即进入 AOV (aov_exit_set(AOV_EXIT_ENTER_NOW, 0))
+ *   exit_forever 或 ef   永久退出 AOV (aov_exit_set(AOV_EXIT_FOREVER, 0))
+ *   exit_timed:N 或 et:N 退出 AOV N 秒后自动重入 (aov_exit_set(AOV_EXIT_TIMING, N))
  *
  * 示例:
  *   ./aov wait:60 exit_forever
@@ -1203,7 +1189,7 @@ static void run_test_sequence(int argc, char *argv[])
         printf("[USER] ═══════════════════════════════════════\n");
         printf("[USER] 后端选择:\n");
         printf("[USER]   splice              AVS 水平拼接，输出 splice_main/sub 两个文件\n");
-        printf("[USER]   multi / mutli       双 sensor 独立录像，输出 d0/d1 main/sub 四个文件\n");
+        printf("[USER]   multi              双 sensor 独立录像，输出 d0/d1 main/sub 四个文件\n");
         printf("[USER] 当前后端: %s\n", user_backend_name());
         printf("[USER] 支持的动作:\n");
         printf("[USER]   wait:N / w:N       等待 N 秒\n");
@@ -1214,7 +1200,7 @@ static void run_test_sequence(int argc, char *argv[])
         printf("[USER] 示例:\n");
         printf("[USER]   ① %s splice wait:60 exit_forever\n", argv[0]);
         printf("[USER]      → 拼接录像运行 AOV 1 分钟后永久退出，程序保持后台\n");
-        printf("[USER]   ② %s mutli wait:120 exit_timed:10 wait:60 exit_forever\n", argv[0]);
+        printf("[USER]   ② %s multi wait:120 exit_timed:10 wait:60 exit_forever\n", argv[0]);
         printf("[USER]      → 非拼接录像运行 AOV 2 分钟 → 退出 10 秒 → 再运行 1 分钟 → 永久退出\n");
         printf("[USER]   ③ %s splice enter\n", argv[0]);
         printf("[USER]      → 立即进入 AOV 并一直保持，直到 Ctrl+C\n");
@@ -1225,7 +1211,7 @@ static void run_test_sequence(int argc, char *argv[])
         printf("[USER] 无参数，运行默认序列: wait:60 exit_forever\n");
 
         for (int t = 0; t < 60 && g_running; t++) sleep(1);
-        if (g_running) aov_exit_set(-1);
+        if (g_running) aov_exit_set(AOV_EXIT_FOREVER, 0);
         printf("[USER] 测试序列完成，程序保持后台运行 (Ctrl+C 退出)\n");
         return;
     }
@@ -1249,10 +1235,10 @@ static void run_test_sequence(int argc, char *argv[])
             }
         } else if (strcmp(arg, "enter") == 0 || strcmp(arg, "e") == 0) {
             printf("[USER] [step %d/%d] enter AOV\n", step, total);
-            aov_exit_set(0);
+            aov_exit_set(AOV_EXIT_ENTER_NOW, 0);
         } else if (strcmp(arg, "exit_forever") == 0 || strcmp(arg, "ef") == 0) {
             printf("[USER] [step %d/%d] exit AOV forever\n", step, total);
-            aov_exit_set(-1);
+            aov_exit_set(AOV_EXIT_FOREVER, 0);
         } else if (strncmp(arg, "exit_timed:", 11) == 0 ||
                    strncmp(arg, "et:", 3) == 0) {
             const char *val = (arg[0] == 'e' && arg[1] == 't' && arg[2] == ':')
@@ -1260,7 +1246,7 @@ static void run_test_sequence(int argc, char *argv[])
             int sec = atoi(val);
             printf("[USER] [step %d/%d] exit AOV for %d seconds\n",
                    step, total, sec);
-            aov_exit_set(sec);
+            aov_exit_set(AOV_EXIT_TIMING, sec);
         } else {
             printf("[USER] [step %d/%d] unknown action: %s (skip)\n",
                    step, total, arg);
@@ -1342,7 +1328,7 @@ int main(int argc, char *argv[])
         printf("[USER] system SD mount is still busy, abort record init\n");
         goto fail_record_all;
     }
-    Aov_BindSdcard();
+    aov_helper_bind_sdcard();
     if (record_wait_sd_storage(5000) != 0) {
         printf("[USER] SD storage is not ready after bind, abort record init "
                "(check mount point %s)\n", REC_OUTPUT_MOUNT);
@@ -1384,7 +1370,7 @@ int main(int argc, char *argv[])
      *     [0][0] splice main 3840x1080
      *     [0][1] splice sub  1920x540
      *
-     *   mutli:
+     *   multi:
      *     [0][0] dev0 main 1920x1080
      *     [0][1] dev0 sub  640x360
      *     [1][0] dev1 main 1920x1080
@@ -1502,7 +1488,7 @@ int main(int argc, char *argv[])
     /* ────────────────────────────────────────────
      * Step 7: 初始化 AOV，注册回调
      * ──────────────────────────────────────────── */
-    aov_init(callbacks);
+    aov_init(&callbacks);
     printf("[USER] AOV init done, scheduler thread running\n");
 
     /* ────────────────────────────────────────────
