@@ -58,6 +58,7 @@ file(GLOB api_srcs
     ${DQUEUE_SOURCE_DIRS}           # 数据队列模块源文件
     ${CAMERA_ADAPTER_SOURCE_DIRS}   # 摄像头适配器模块源文件
     ${AOV_ADAPTER_DIR}/sample_comm.c        # AOV 专用 common 接口
+    ${AOV_SOURCE_DIRS}              #  (aov_helper.c)
     # sample_comm_muxer.c removed — raw stream output no longer needs rkmuxer
     )
 # 排除 common/sample_comm.c（AOV 用 aov/ 版本替代）

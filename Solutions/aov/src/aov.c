@@ -33,9 +33,35 @@
 #include <sys/mount.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/prctl.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/sendfile.h>
 
 #include "rk_mpi_sys.h"
 #include "rk_common.h"
+#include <time.h>
+
+/* ==================================================================
+ * 帧率测试开关
+ *
+ * TEST_FPS > 0 时，将 VI/ISP/VENC/录像帧率统一设为 TEST_FPS，
+ * 并在 VENC 回调中统计实际帧率，每隔 5 秒打印一次统计信息。
+ * 编译时可通过 -DTEST_FPS=30 范围覆盖，也可直接修改此处宏值。
+ * ================================================================== */
+#define TEST_FPS 30
+
+#if TEST_FPS
+#define TST_VIDEO_FPS      TEST_FPS
+#define TST_VIDEO_GOP      TEST_FPS
+#define TST_VI_FRAME_RATE  TEST_FPS
+#define TST_ISP_FPS        TEST_FPS
+#else
+#define TST_VIDEO_FPS      REC_VIDEO_FPS
+#define TST_VIDEO_GOP      REC_VIDEO_GOP
+#define TST_VI_FRAME_RATE  USER_VI_FRAME_RATE
+#define TST_ISP_FPS        15
+#endif
 
 /* ==================================================================
  * 全局变量
@@ -58,6 +84,12 @@
 #define REC_MODE_MAX    2
 #define REC_VIDEO_FPS   15
 #define REC_VIDEO_GOP   15
+#if TEST_FPS
+#undef REC_VIDEO_FPS
+#undef REC_VIDEO_GOP
+#define REC_VIDEO_FPS   TST_VIDEO_FPS
+#define REC_VIDEO_GOP   TST_VIDEO_GOP
+#endif
 #define REC_MAIN_KBPS   2048
 #define REC_SUB_KBPS    512
 #define REC_MAIN_MAX_KBPS 4096
@@ -68,6 +100,7 @@
 #define REC_AUDIO_SAMPLES_PER_FRAME 1024
 #define REC_OUTPUT_MOUNT "/mnt/aov_sdcard"
 #define REC_OUTPUT_DIR   "/mnt/aov_sdcard/aov"
+#define SHOT_TMP_DIR     "/tmp/aov_shot"   /* AOV 期间 SD 不可用时的临时截图目录 */
 #define REC_SD_DEVICE    "/dev/mmcblk1p1"
 #define SYS_SDCARD_MOUNT "/mnt/sdcard"
 #define SYS_SDCARD_AUTOMOUNT_UNIT "mnt-sdcard.automount"
@@ -80,6 +113,11 @@
 #define REC_QUEUE_WAKE_WATERMARK 80
 #define REC_QUEUE_LOG_DROP_STEP 30
 #define USER_AOV_FRAMES_PER_SECOND_MAX 3
+#if TEST_FPS
+#define USER_VI_FRAME_RATE   TST_VI_FRAME_RATE  /* TEST_FPS: VI/ISP 采集帧率 */
+#else
+#define USER_VI_FRAME_RATE   15    /* VI/ISP 采集帧率 (fps)，0 表示使用默认值 15 */
+#endif
 static AOV_RECORD_CTX_T* g_record_ctx[REC_SENSOR_MAX][REC_CHN_MAX];
 
 /*
@@ -862,6 +900,9 @@ static void user_osd_deinit_all(void)
  *      在视频线程中触发，本回调负责休眠前的外围设备准备。
  */
 
+/* 前向声明: shot_migrate_tmp_to_sd 定义在 user_jpeg_mjpeg_save 之后 */
+static void shot_migrate_tmp_to_sd(void);
+
 /* 外设恢复：AOV 休眠期间 Ctrl+C 退出时，重新绑定被解绑的外设。
  * user_aov_exit_action 和清理路径共用此函数。 */
 static void restore_peripherals(void)
@@ -873,6 +914,8 @@ static void restore_peripherals(void)
 
     aov_helper_enable_nonboot_cpus();
     aov_helper_enable_usb();
+    system("ifconfig usb0 up");
+    system("dhclient usb0");
     aov_helper_bind_ethernet();
     aov_helper_bind_soundcard();
     aov_helper_bind_sdio();
@@ -883,6 +926,8 @@ static void restore_peripherals(void)
         record_set_sd_ready(1);
         record_set_drain_pause(0);
         record_signal_drain();
+        /* 把 AOV 期间暂存在 /tmp/aov_shot 的截图迁移到 SD 卡 */
+        shot_migrate_tmp_to_sd();
         if (g_record_queue) {
             printf("[USER] SD ready, record drain resumed: queue=%d used=%zu/%zu\n",
                    aov_record_queue_count(g_record_queue),
@@ -1004,12 +1049,218 @@ int user_aov_write_event(void)
 }
 
 /* ==================================================================
+ * 截图工作线程 — 把 JPEG/MJPEG 截图移出 VENC 回调路径
+ *
+ * aov_video_jpeg_save / aov_video_mjpeg_save 为异步触发接口: 只投递截图
+ * 请求并立即返回, 编码结果由 SDK 通过 user_venc_data_cb 上报
+ * (frame_type 'J'=单帧 JPEG, 'M'=多帧拼接 MJPEG, 数据在 frame->jpeg 成员)。
+ * 因此分工为:
+ *   1. 触发时登记目标文件路径 (SHOT_REQ_T.path);
+ *   2. user_venc_data_cb 收到 'J'/'M' 帧时只做一次 memcpy 把数据取走
+ *      (SDK 回调返回后 frame->jpeg.data_vaddr 即失效), 不碰慢速 IO;
+ *   3. shot_worker_thread 串行 "触发请求 → 等回调送数据 → 自己写盘",
+ *      即文件写入完全由工作线程执行, VENC 回调线程只付出 memcpy 代价,
+ *      截图与写盘耗时不会被 aov_state adjust_suspend_time() 算进 CPU 活动
+ *      时间, 避免下一轮 enter_sleep 时长被补偿性缩短。
+ * ================================================================== */
+
+/* 截图请求上下文: 触发时登记目标路径, 回调取走数据, 工作线程写盘 */
+#define SHOT_PATH_MAX         512
+#define SHOT_MJPEG_FRAMES     3      /* MJPEG 动态截图拼接帧数 */
+/* 等待回调送数据的超时:
+ * AOV 单帧模式下 VI 是"唤醒-暂停"节流采帧, 实测帧间隔可达 ~3s, MJPEG 需要
+ * 拼 3 帧 (跨 3 次唤醒) 约 9s, 所以超时必须覆盖 3 帧采集时间, 不能按连续帧
+ * 模式 (~33ms/帧) 估。 */
+#define SHOT_DATA_TIMEOUT_MS  20000
+
+typedef struct {
+    int  pending;                    /* 1 = 已触发, 等待回调送数据 */
+    int  recved;                     /* 1 = 回调已 memcpy 出数据, 等待写盘 */
+    int  frames;                     /* 请求帧数 (1=JPEG, >1=MJPEG) */
+    char path[SHOT_PATH_MAX];        /* 触发时计算好的目标文件路径 */
+    unsigned char *buf;              /* 回调 memcpy 出来的 JPEG/MJPEG 数据 */
+    int  size;                       /* buf 字节数 */
+    unsigned char type;              /* 'J' = JPEG, 'M' = MJPEG */
+    unsigned int width;              /* 图像宽 */
+    unsigned int height;             /* 图像高 */
+    unsigned int frame_num;          /* 拼接帧数 */
+} SHOT_REQ_T;
+
+/* 前向声明：实际由工作线程串行调用 */
+static int user_jpeg_mjpeg_save(unsigned char schn, unsigned char vchn);
+
+static pthread_t       g_shot_thread;
+static pthread_mutex_t g_shot_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_shot_cond  = PTHREAD_COND_INITIALIZER;
+static volatile int    g_shot_thread_running = 0;
+static volatile int    g_shot_pending_schn  = -1;  /* -1 = 无待处理请求 */
+static SHOT_REQ_T      g_shot_req[REC_SENSOR_MAX];
+
+/* 截图工作线程主循环: 等待请求 -> 调用 user_jpeg_mjpeg_save -> 回到等待 */
+static void* shot_worker_thread(void *arg)
+{
+    (void)arg;
+    prctl(PR_SET_NAME, "shot_worker");
+    pthread_mutex_lock(&g_shot_mutex);
+    while (g_shot_thread_running) {
+        while (g_shot_pending_schn < 0 && g_shot_thread_running) {
+            pthread_cond_wait(&g_shot_cond, &g_shot_mutex);
+        }
+        if (!g_shot_thread_running)
+            break;
+
+        int schn = g_shot_pending_schn;
+        g_shot_pending_schn = -1;
+        pthread_mutex_unlock(&g_shot_mutex);
+
+        /* 串行执行 JPEG + MJPEG 截图, 失败不影响主流程 */
+        (void)user_jpeg_mjpeg_save((unsigned char)schn, AOV_VIDEO_MAIN_CHN);
+
+        pthread_mutex_lock(&g_shot_mutex);
+    }
+    pthread_mutex_unlock(&g_shot_mutex);
+    return NULL;
+}
+
+/* 启动截图工作线程 */
+static int shot_worker_init(void)
+{
+    g_shot_pending_schn = -1;
+    g_shot_thread_running = 1;
+    if (pthread_create(&g_shot_thread, NULL, shot_worker_thread, NULL) != 0) {
+        g_shot_thread_running = 0;
+        printf("[USER] shot worker thread create failed\n");
+        return -1;
+    }
+    printf("[USER] shot worker thread started\n");
+    return 0;
+}
+
+/* 停止截图工作线程 (等待当前截图完成) */
+static void shot_worker_deinit(void)
+{
+    if (!g_shot_thread_running)
+        return;
+    pthread_mutex_lock(&g_shot_mutex);
+    g_shot_thread_running = 0;
+    pthread_cond_signal(&g_shot_cond);
+    pthread_mutex_unlock(&g_shot_mutex);
+
+    pthread_join(g_shot_thread, NULL);
+    g_shot_thread_running = 0;
+    printf("[USER] shot worker thread stopped\n");
+}
+
+/* VENC 回调中调用: 投递一个截图请求 (非阻塞)
+ * 若上一请求未处理, 直接覆盖 (AOV 单帧模式 1fps, 丢失可接受) */
+static void shot_request(unsigned char schn)
+{
+    pthread_mutex_lock(&g_shot_mutex);
+    g_shot_pending_schn = schn;
+    pthread_cond_signal(&g_shot_cond);
+    pthread_mutex_unlock(&g_shot_mutex);
+}
+
+/* 接收截图结果: 取走 SDK 上报的 JPEG/MJPEG 数据 (运行在后端 VENC 回调线程)
+ *
+ * frame->jpeg.data_vaddr 仅在回调期间有效（SDK 回调返回后即释放），所以这里
+ * 必须把数据 memcpy 到自己的 buf。为不阻塞 VENC 回调线程, 本函数只做拷贝,
+ * 落盘交给 shot_worker_thread; 数据备好后唤醒它。 */
+static int user_screenshot_frame_recv(unsigned char schn, AOV_VIDEO_FRAME_T *frame)
+{
+    const unsigned char *data = (const unsigned char *)frame->jpeg.data_vaddr;
+    unsigned char *buf;
+    int total = (int)frame->data_size;
+    int ret = -1;
+
+    if (schn >= REC_SENSOR_MAX)
+        return -1;
+
+    if (!data || total <= 0) {
+        printf("[USER] shot %c frame empty: size=%d\n", frame->frame_type, total);
+        return -1;
+    }
+
+    buf = (unsigned char *)malloc((size_t)total);
+    if (!buf) {
+        printf("[USER] shot %c frame malloc %d failed\n", frame->frame_type, total);
+        return -1;
+    }
+    memcpy(buf, data, (size_t)total);
+
+    pthread_mutex_lock(&g_shot_mutex);
+    if (g_shot_req[schn].pending && !g_shot_req[schn].recved) {
+        g_shot_req[schn].buf       = buf;
+        g_shot_req[schn].size      = total;
+        g_shot_req[schn].type      = frame->frame_type;
+        g_shot_req[schn].width     = frame->jpeg.width;
+        g_shot_req[schn].height    = frame->jpeg.height;
+        g_shot_req[schn].frame_num = frame->jpeg.frame_num;
+        g_shot_req[schn].recved    = 1;
+        ret = 0;
+    }
+    pthread_cond_signal(&g_shot_cond);
+    pthread_mutex_unlock(&g_shot_mutex);
+
+    if (ret != 0) {
+        printf("[USER] shot %c frame dropped: no pending request schn=%d\n",
+               frame->frame_type, schn);
+        free(buf);
+    }
+    return ret;
+}
+
+/* 把截图数据写入文件 (由 shot_worker_thread 执行, 不在 VENC 回调线程里) */
+static int user_screenshot_write_file(const char *path, const unsigned char *data,
+                                      int size, unsigned char type,
+                                      unsigned int width, unsigned int height,
+                                      unsigned int frame_num)
+{
+    int left = size;
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+    if (fd < 0) {
+        printf("[USER] shot open %s failed: errno=%d\n", path, errno);
+        return -1;
+    }
+
+    while (left > 0) {
+        ssize_t n = write(fd, data, (size_t)left);
+        if (n <= 0) {
+            printf("[USER] shot write %s failed: errno=%d\n", path, errno);
+            close(fd);
+            return -1;
+        }
+        data += n;
+        left -= (int)n;
+    }
+    close(fd);
+
+    printf("[USER] %s saved: %s (%d bytes, %ux%u, %u frame(s))\n",
+           (type == 'M') ? "mjpeg" : "jpeg", path, size, width, height, frame_num);
+    return 0;
+}
+
+/* ==================================================================
  * 视频帧回调 — VENC 编码完成后送入 muxer 封装 MP4
  * ================================================================== */
 
 static int user_venc_data_cb(unsigned char schn, unsigned char vchn, AOV_VIDEO_FRAME_T* frame)
 {
-    if (!frame || !frame->enc.data_vaddr) {
+    if (!frame) {
+        printf("[USER] frame or data is NULL\n");
+        return -1;
+    }
+
+    /* ── 三通道截图结果 (frame_type 'J'/'M') ──
+     * 数据在 frame->jpeg 成员, vchn == AOV_VIDEO_THIRD_CHN, 不进入录像队列,
+     * 这里只 memcpy 取走数据(回调返回后即失效)并交给 shot worker 落盘,
+     * 避免慢速写文件阻塞本回调。注意必须在下面 vchn >= REC_CHN_MAX 的
+     * 过滤之前处理 (THIRD_CHN 不占用录像通道号)。 */
+    if (frame->frame_type == 'J' || frame->frame_type == 'M')
+        return user_screenshot_frame_recv(schn, frame);
+
+    if (!frame->enc.data_vaddr) {
         printf("[USER] frame or data is NULL\n");
         return -1;
     }
@@ -1020,6 +1271,65 @@ static int user_venc_data_cb(unsigned char schn, unsigned char vchn, AOV_VIDEO_F
     /* 区分单帧/连续帧模式：AOV 模式=单帧，非 AOV=连续帧 */
     aov_status_e status = aov_status_get();
     int midx = (status == AOV_STATUS_ACTIVE) ? REC_MODE_SINGLE : REC_MODE_MULTI;
+
+#if TEST_FPS
+    /* ── 帧率统计（仅连续帧模式，即退出 AOV 后） ──
+     * AOV 模式下为单帧唤醒，帧率无意义，跳过统计。
+     * 退出 AOV 进入连续帧模式后，每 5 秒打印一次实际帧率。
+     * 若重新进入 AOV 模式则重置标记，下次退出 AOV 时从头统计。 */
+    {
+        static int    fps_frame_cnt[REC_SENSOR_MAX][REC_CHN_MAX];
+        static struct timespec fps_last_ts[REC_SENSOR_MAX][REC_CHN_MAX];
+        static int    fps_active[REC_SENSOR_MAX][REC_CHN_MAX]; /* 该通道是否正在统计 */
+        static int    fps_init = 0;
+
+        if (!fps_init) {
+            memset(fps_frame_cnt, 0, sizeof(fps_frame_cnt));
+            memset(fps_active, 0, sizeof(fps_active));
+            fps_init = 1;
+        }
+
+        if (midx == REC_MODE_MULTI) {
+            /* 首次进入连续帧模式（或从 AOV 切回后）重置该通道的统计基准 */
+            if (!fps_active[schn][vchn]) {
+                fps_active[schn][vchn] = 1;
+                fps_frame_cnt[schn][vchn] = 0;
+                clock_gettime(CLOCK_MONOTONIC, &fps_last_ts[schn][vchn]);
+            }
+
+            fps_frame_cnt[schn][vchn]++;
+
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+
+            double elapsed = (now.tv_sec  - fps_last_ts[schn][vchn].tv_sec)
+                           + (now.tv_nsec - fps_last_ts[schn][vchn].tv_nsec) / 1e9;
+
+            if (elapsed >= 5.0) {
+                double actual_fps = fps_frame_cnt[schn][vchn] / elapsed;
+                char rec_name[32];
+                user_record_file_name(rec_name, sizeof(rec_name), schn, vchn);
+                printf("[TEST_FPS] %s: %d frames in %.2fs = %.2f fps (target=%d)\n",
+                       rec_name, fps_frame_cnt[schn][vchn], elapsed,
+                       actual_fps, TEST_FPS);
+                fps_frame_cnt[schn][vchn] = 0;
+                fps_last_ts[schn][vchn] = now;
+            }
+        } else {
+            /* AOV 单帧模式：不统计，标记未激活以便下次连续帧时重新开始 */
+            fps_active[schn][vchn] = 0;
+        }
+    }
+#endif /* TEST_FPS */
+
+    /* ── AOV 单帧模式：投递截图请求到工作线程 ──
+     * 仅在 AOV 模式（单帧唤醒）时触发，退出 AOV 后（连续帧）不再截图。
+     * 只对主通道 (vchn=0) 触发，避免子通道重复截图。
+     * 工作线程异步执行 user_jpeg_mjpeg_save, 不阻塞本回调路径,
+     * 避免截图耗时被 aov_state adjust_suspend_time 算进 CPU 活动时间。 */
+    if (midx == REC_MODE_SINGLE && vchn == AOV_VIDEO_MAIN_CHN) {
+        shot_request(schn);
+    }
 
     int ret = aov_record_queue_push(g_record_queue,
                                     schn, vchn, (unsigned char)midx,
@@ -1088,22 +1398,25 @@ static int build_video_pipeline(void)
     vi_attr.vi_info[AOV_VIDEO_MAIN_CHN].height  = USER_INPUT_MAIN_HEIGHT;
     vi_attr.vi_info[AOV_VIDEO_SUB_CHN].width    = USER_INPUT_SUB_WIDTH;
     vi_attr.vi_info[AOV_VIDEO_SUB_CHN].height   = USER_INPUT_SUB_HEIGHT;
-    vi_attr.vi_info[AOV_VIDEO_MJPEG_CHN].width  = USER_INPUT_SUB_WIDTH;
-    vi_attr.vi_info[AOV_VIDEO_MJPEG_CHN].height = USER_INPUT_SUB_HEIGHT;
+    vi_attr.vi_info[AOV_VIDEO_THIRD_CHN].width  = USER_INPUT_SUB_WIDTH;
+    vi_attr.vi_info[AOV_VIDEO_THIRD_CHN].height = USER_INPUT_SUB_HEIGHT;
     vi_attr.comm_info.sensor_num = USER_SENSOR_NUM;
     vi_attr.avs_mode = AVS_SPLICE_HORIZONTAL;
+    vi_attr.vi_frame_rate = USER_VI_FRAME_RATE;
 
     ret = aov_video_vi_init(&vi_attr);
     if (ret != 0) {
         printf("[USER] aov_video_vi_init failed: %d\n", ret);
         return -1;
     }
-    printf("[USER] VI init done, backend=%s\n", user_backend_name());
+    printf("[USER] VI init done, backend=%s, vi_frame_rate=%d\n",
+           user_backend_name(),
+           vi_attr.vi_frame_rate ? vi_attr.vi_frame_rate : 15);
 
     /* Step 3: VENC 主码流 */
     AOV_VENC_ATTR_T venc_attr;
     memset(&venc_attr, 0, sizeof(venc_attr));
-    venc_attr.encode_type              = 0;     /* H.264 */
+    venc_attr.encode_type              = AOV_VIDEO_ENCODE_H264;
     venc_attr.br_mode                  = 0;
     venc_attr.venc_res.width           = user_record_width(AOV_VIDEO_MAIN_CHN);
     venc_attr.venc_res.height          = user_record_height(AOV_VIDEO_MAIN_CHN);
@@ -1142,18 +1455,268 @@ static int build_video_pipeline(void)
     g_record_venc_attr_valid[AOV_VIDEO_SUB_CHN] = 1;
     printf("[USER] VENC SUB init done\n");
 
+    /* Step 5: VENC 第三通道（JPEG/MJPEG 共用编码器）
+     *
+     * 第三通道由 screenshot 模块独立管理（不使用 SYS_Bind），
+     * 内部创建 JPEG 编码器 + 注册 VI/AVS 源信息。
+     * aov_video_jpeg_save / aov_video_mjpeg_save 触发截图请求, 编码结果
+     * 经 user_venc_data_cb (frame_type 'J'/'M') 回调上报, 由上层落盘。
+     */
+    AOV_VENC_ATTR_T third_attr;
+    memset(&third_attr, 0, sizeof(third_attr));
+    third_attr.encode_type              = AOV_VIDEO_ENCODE_JPEG;
+    third_attr.jpeg_enc_type            = 0;
+    third_attr.venc_res.width           = user_record_width(AOV_VIDEO_MAIN_CHN);
+    third_attr.venc_res.height          = user_record_height(AOV_VIDEO_MAIN_CHN);
+    third_attr.bit_rate_attr.fps        = REC_VIDEO_FPS;
+    third_attr.bit_rate_attr.gop_len    = REC_VIDEO_GOP;
+    third_attr.bit_rate_attr.target_kbps = user_record_target_kbps(AOV_VIDEO_MAIN_CHN);
+    third_attr.bit_rate_attr.max_kbps   = user_record_max_kbps(AOV_VIDEO_MAIN_CHN);
+
+    ret = aov_video_venc_init(AOV_VIDEO_THIRD_CHN, &third_attr);
+    if (ret != 0) {
+        printf("[USER] venc init THIRD failed: %d\n", ret);
+        aov_video_venc_uninit(AOV_VIDEO_SUB_CHN);
+        aov_video_venc_uninit(AOV_VIDEO_MAIN_CHN);
+        aov_video_vi_uninit();
+        return -1;
+    }
+    printf("[USER] VENC THIRD (JPEG/MJPEG) init done\n");
+
+    /* 启动截图工作线程 (异步处理 JPEG/MJPEG 截图请求, 不阻塞 VENC 回调) */
+    if (shot_worker_init() != 0) {
+        printf("[USER] shot_worker_init failed, screenshot disabled\n");
+    }
+
     return 0;
 }
 
 static void destroy_video_pipeline(void)
 {
+    /* 先停止截图工作线程 (等待当前截图完成, 避免与 VENC 销毁竞态) */
+    shot_worker_deinit();
+
     aov_video_venc_stop();
+    aov_video_venc_uninit(AOV_VIDEO_THIRD_CHN);
     aov_video_venc_uninit(AOV_VIDEO_SUB_CHN);
     aov_video_venc_uninit(AOV_VIDEO_MAIN_CHN);
     aov_video_vi_uninit();
     memset(g_record_venc_attr, 0, sizeof(g_record_venc_attr));
     memset(g_record_venc_attr_valid, 0, sizeof(g_record_venc_attr_valid));
     printf("[USER] video pipeline destroyed\n");
+}
+
+/* ==================================================================
+ * JPEG / MJPEG 截图 — 保存到与 .mp4 同一目录
+ * ================================================================== */
+
+/*
+ * 在 AOV 单帧模式下，每次 user_venc_data_cb 触发时调用此函数，
+ * 依次触发一帧 JPEG 静态截图和一帧 MJPEG 动态截图。
+ *
+ * 截图接口为异步触发: 本函数登记目标路径 + 投递请求, 等 user_venc_data_cb
+ * 收到 'J'/'M' 帧并把数据 memcpy 出来, 再由本线程 (shot worker) 写盘。
+ * SDK 同一时刻只允许一个截图请求, 所以两次请求必须串行: 等上一张写完再
+ * 触发下一张。
+ *
+ * 文件命名规则 (每次调用序号自增, 避免覆盖)：
+ *   splice 模式: splice_jpeg_001.jpg, splice_mjpeg_001.mjpeg, ...
+ *   multi  模式: d0_jpeg_001.jpg, d0_mjpeg_001.mjpeg, ...
+ *
+ * @param schn 传感器通道号
+ * @param vchn 视频通道号 (0=主通道全分辨率, 1=子通道半分辨率)
+ * @return 0 成功, 负值失败
+ */
+static int user_jpeg_mjpeg_save(unsigned char schn, unsigned char vchn)
+{
+    static int s_shot_seq = 0;   /* 每调用一次自增, 用于文件命名 */
+
+    char prefix[32];
+    const char *out_dir;        /* 实际保存目录: SD 卡 or /tmp 临时区 */
+    int seq = ++s_shot_seq;
+    int i;
+
+    if (g_user_backend == USER_BACKEND_SPLICE)
+        snprintf(prefix, sizeof(prefix), "splice");
+    else
+        snprintf(prefix, sizeof(prefix), "d%d", schn);
+
+    /* 根据 SD 卡状态选择保存目录:
+     *   SD ready (连续帧模式 / 退出 AOV 后): 直接写 SD 卡
+     *   SD not ready (AOV 单帧模式期间): 写 /tmp/aov_shot 临时区,
+     *   等退出 AOV 恢复 SD 后由 shot_migrate_tmp_to_sd() 批量迁移 */
+    out_dir = g_record_sd_ready ? REC_OUTPUT_DIR : SHOT_TMP_DIR;
+    if (!g_record_sd_ready) {
+        /* 确保临时目录存在 (tmpfs, 不持久) */
+        if (mkdir(SHOT_TMP_DIR, 0755) != 0 && errno != EEXIST) {
+            printf("[USER] mkdir %s failed: %d\n", SHOT_TMP_DIR, errno);
+        }
+    }
+
+    /* 1. JPEG 静态截图 (frame_num=1), 2. MJPEG 动态截图 (多帧拼接) */
+    for (i = 0; i < 2; i++) {
+        int         frames = (i == 0) ? 1 : SHOT_MJPEG_FRAMES;
+        const char *suffix = (i == 0) ? "jpeg" : "mjpeg";
+        const char *ext    = (i == 0) ? "jpg"  : "mjpeg";
+        struct timespec ts;
+        int ret;
+
+        /* 登记目标路径与请求状态, 供回调取数据 / 本线程写盘时取用 */
+        pthread_mutex_lock(&g_shot_mutex);
+        snprintf(g_shot_req[schn].path, sizeof(g_shot_req[schn].path),
+                 "%s/%s_%s_%03d.%s", out_dir, prefix, suffix, seq, ext);
+        g_shot_req[schn].buf     = NULL;
+        g_shot_req[schn].recved  = 0;
+        g_shot_req[schn].frames  = frames;
+        g_shot_req[schn].pending = 1;
+        pthread_mutex_unlock(&g_shot_mutex);
+
+        /* 触发截图 (异步): 结果经 user_venc_data_cb 上报 */
+        if (frames > 1)
+            ret = aov_video_mjpeg_save(schn, vchn, (unsigned char)frames);
+        else
+            ret = aov_video_jpeg_save(schn, vchn);
+
+        if (ret != 0) {
+            printf("[USER] %s shot request %s failed: %d\n",
+                   suffix, g_shot_req[schn].path, ret);
+            pthread_mutex_lock(&g_shot_mutex);
+            g_shot_req[schn].pending = 0;
+            pthread_mutex_unlock(&g_shot_mutex);
+            continue;
+        }
+
+        /* 等回调把数据 memcpy 出来 (回调在后端 VENC 线程只做拷贝, 不写盘)
+         * 线程退出 (g_shot_thread_running=0) 时立即结束等待, 不必等超时。 */
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec  += SHOT_DATA_TIMEOUT_MS / 1000;
+        ts.tv_nsec += (long)(SHOT_DATA_TIMEOUT_MS % 1000) * 1000000L;
+        if (ts.tv_nsec >= 1000000000L) {
+            ts.tv_sec++;
+            ts.tv_nsec -= 1000000000L;
+        }
+
+        pthread_mutex_lock(&g_shot_mutex);
+        while (g_shot_req[schn].pending && !g_shot_req[schn].recved
+               && g_shot_thread_running) {
+            if (pthread_cond_timedwait(&g_shot_cond, &g_shot_mutex, &ts) != 0) {
+                printf("[USER] %s shot timeout: %s\n", suffix, g_shot_req[schn].path);
+                break;
+            }
+        }
+
+        /* 取出数据并复位请求 (写盘不在锁内进行) */
+        unsigned char *buf      = g_shot_req[schn].buf;
+        int            size     = g_shot_req[schn].size;
+        unsigned char  type     = g_shot_req[schn].type;
+        unsigned int   w        = g_shot_req[schn].width;
+        unsigned int   h        = g_shot_req[schn].height;
+        unsigned int   fnum     = g_shot_req[schn].frame_num;
+        char           path[SHOT_PATH_MAX];
+        snprintf(path, sizeof(path), "%s", g_shot_req[schn].path);
+        g_shot_req[schn].buf     = NULL;
+        g_shot_req[schn].recved  = 0;
+        g_shot_req[schn].pending = 0;
+        pthread_mutex_unlock(&g_shot_mutex);
+
+        /* 本线程写盘: VENC 回调线程不承担慢速 IO */
+        if (buf) {
+            user_screenshot_write_file(path, buf, size, type, w, h, fnum);
+            free(buf);
+        }
+
+        /* 线程正在退出, 不再触发后续请求 */
+        if (!g_shot_thread_running)
+            break;
+    }
+
+    return 0;
+}
+
+/* 把 /tmp/aov_shot 下的所有截图迁移到 SD 卡 REC_OUTPUT_DIR
+ * 在退出 AOV 恢复 SD 后调用, 一次性拷贝 */
+static void shot_migrate_tmp_to_sd(void)
+{
+    DIR *dir = opendir(SHOT_TMP_DIR);
+    if (!dir) {
+        /* 没有临时截图, 直接返回 */
+        return;
+    }
+
+    /* 确保 SD 卡目标目录存在 */
+    if (access(REC_OUTPUT_DIR, W_OK) != 0) {
+        if (mkdir(REC_OUTPUT_DIR, 0755) != 0 && errno != EEXIST) {
+            printf("[USER] migrate: mkdir %s failed: %d\n", REC_OUTPUT_DIR, errno);
+            closedir(dir);
+            return;
+        }
+    }
+
+    struct dirent *ent;
+    int migrated = 0;
+    int failed = 0;
+
+    while ((ent = readdir(dir)) != NULL) {
+        if (ent->d_name[0] == '.')
+            continue;
+
+        char src[512];
+        char dst[512];
+        snprintf(src, sizeof(src), "%s/%s", SHOT_TMP_DIR, ent->d_name);
+        snprintf(dst, sizeof(dst), "%s/%s", REC_OUTPUT_DIR, ent->d_name);
+
+        /* /tmp 是 tmpfs, SD 卡是另一个 fs -> rename 跨 fs 会失败, 用 read/write 拷贝 */
+        int in_fd = open(src, O_RDONLY);
+        if (in_fd < 0) {
+            printf("[USER] migrate: open %s failed: %d\n", src, errno);
+            failed++;
+            continue;
+        }
+        int out_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (out_fd < 0) {
+            printf("[USER] migrate: open %s failed: %d\n", dst, errno);
+            close(in_fd);
+            failed++;
+            continue;
+        }
+
+        /* 用 sendfile 在内核态拷贝 (零拷贝) */
+        struct stat st;
+        if (fstat(in_fd, &st) == 0 && st.st_size > 0) {
+            off_t offset = 0;
+            ssize_t sent = sendfile(out_fd, in_fd, &offset, st.st_size);
+            if (sent < 0) {
+                /* sendfile 失败回退到 read/write */
+                char buf[8192];
+                ssize_t n;
+                while ((n = read(in_fd, buf, sizeof(buf))) > 0) {
+                    if (write(out_fd, buf, n) != n) {
+                        failed++;
+                        break;
+                    }
+                }
+                if (n < 0) failed++;
+            }
+        }
+
+        close(in_fd);
+        close(out_fd);
+
+        /* 拷贝成功后删除临时文件 */
+        if (unlink(src) == 0)
+            migrated++;
+        else
+            failed++;
+    }
+    closedir(dir);
+
+    /* 目录空了就删掉 */
+    rmdir(SHOT_TMP_DIR);
+
+    if (migrated > 0 || failed > 0) {
+        printf("[USER] shot migrate tmp -> sd: migrated=%d failed=%d\n",
+               migrated, failed);
+    }
 }
 
 /* ====== 命令行参数自由组合测试序列 ======
@@ -1300,7 +1863,7 @@ int main(int argc, char *argv[])
         isp_attr.sensor_num  = 2;
         isp_attr.hdr_mode    = AOV_ISP_HDR_MODE_NORMAL;
         isp_attr.bMultictx   = 0;
-        isp_attr.fps         = 15;
+        isp_attr.fps         = TST_ISP_FPS;
         isp_attr.iq_file_dir = iq_dir;
 
         printf("[USER] ISP init: sensor=%d fps=%d\n",
@@ -1395,7 +1958,7 @@ int main(int argc, char *argv[])
          * │ audio_sample_rate   │ 音频采样率 (Hz)                          │
          * │ audio_channels      │ 音频通道数                               │
          * │ audio_samples/frame │ 每帧音频采样数                           │
-         * │ encode_type         │ 编码类型：0=H.264, 1=H.265               │
+         * │ encode_type         │ 编码类型：AOV_VIDEO_ENCODE_H264/H265      │
          * │ record_fps          │ 名义帧率；muxer 使用 PTS 计算实际间隔     │
          * │ skip_initial_frames │ 建文件前跳过的预热帧数                    │
          * │ max_frames          │ fmp4 muxer sample_pool 容量 (见下)       │
@@ -1484,6 +2047,16 @@ int main(int argc, char *argv[])
         goto fail_pipeline;
     }
     printf("[USER] video pipeline started\n");
+
+    /* ────────────────────────────────────────────
+     * Step 6.5: JPEG/MJPEG 截图 — 在 AOV 单帧模式回调中动态触发
+     *
+     * 不再在此处一次性截图，而是在 user_venc_data_cb 中检测到
+     * AOV 单帧模式（REC_MODE_SINGLE）时，投递截图请求给 shot worker
+     * （触发 aov_video_jpeg_save + aov_video_mjpeg_save），编码结果
+     * 经 user_venc_data_cb 的 'J'/'M' 帧回调按登记路径写盘。
+     * 退出 AOV 模式（连续帧）后不再调用截图接口。
+     * ──────────────────────────────────────────── */
 
     /* ────────────────────────────────────────────
      * Step 7: 初始化 AOV，注册回调

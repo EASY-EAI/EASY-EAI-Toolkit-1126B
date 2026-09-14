@@ -32,7 +32,7 @@
     .audio_channels      = 1, \
     .audio_samples_per_frame = 1024, \
     .max_frames          = AOV_MAX_FRAME_PER_SESSION, \
-    .encode_type         = 0, /* H.264 */ \
+    .encode_type         = 5, /* AOV_VIDEO_ENCODE_H264, rk: RK_CODEC_TYPE_H264 */ \
     .record_fps          = 15, \
     .aov_frame_duration_us = 1000000, /* 1 秒 */ \
     .skip_initial_frames = 0, \
@@ -64,7 +64,7 @@ typedef struct {
     int              audio_channels;        /* 音频通道数 */
     int              audio_samples_per_frame; /* 每帧音频采样数 */
     int              max_frames;            /* 每个文件的帧数上限 */
-    int              encode_type;           /* 0=H.264, 1=H.265 */
+    int              encode_type;           /* 编码类型, 可直接传 AOV_VIDEO_ENCODE_E 枚举值 */
     int              record_fps;            /* MP4 播放帧率 */
     uint32_t         aov_frame_duration_us; /* AOV 单帧播放间隔，0 表示默认 1 秒 */
     int              skip_initial_frames;   /* 建文件前跳过的预热帧数 */
@@ -156,7 +156,7 @@ void aov_record_reset(AOV_RECORD_CTX_T* ctx);
  *
  * // 2. 初始化录像上下文（使用默认值宏，按需覆盖）
  * AOV_RECORD_CFG_T cfg = AOV_RECORD_CFG_DEFAULT("/tmp", "front_main");
- * cfg.encode_type  = 0;          // 0=H.264, 1=H.265
+ * cfg.encode_type  = AOV_VIDEO_ENCODE_H264;  // 或 AOV_VIDEO_ENCODE_H265
  * cfg.on_need_idr  = on_need_idr;
  * cfg.venc_chn     = 0;
  *
