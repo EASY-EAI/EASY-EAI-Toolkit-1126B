@@ -22,8 +22,33 @@
 
 重要更新：
 ---
+> 2026-10-24 :
+> * 更新 easyeai-api
+>     * 算法组件api
+>         * [新增] lane_detect
+> * 新增【Api单例】
+>     * [新增] algorithm-lane_detect
+>
+> 2026-09-14 :
+> * 更新 easyeai-api
+>     * 多媒体组件api
+>         * [更新] aov
+> * 更新【开发实例】
+>     * [更新] aov
+>
+> 2026-08-26 :
+> * 更新 easyeai-api
+>     * 网络协议组件api
+>         * [新增] rtsp_client
+> * 新增【开发实例】
+>     * [新增] vcic_stream
+> * 更新【开发实例】
+>     * [更新] rtspIPCamera
+>     * [更新] rtspMulitPlayer
+>
 > 2026-08-22 :
 > * 发布 EASY-EAI-Toolkit-1126B-0.2.3
+> * 兼容 Ubuntu 22.04 和 Ubuntu 24.04 固件
 > * 更新 easyeai-api
 >     * 通用组件api
 >         * [新增] 日志管理

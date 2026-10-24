@@ -23,8 +23,32 @@ How to use：
 
 important update log:
 ---
+> 2026-10-24 :
+> * update easyeai-api
+>     * algorithm_api
+>         * [new] lane_detect
+> * update Demo
+>     * [new] algorithm-lane_detect
+>
+> 2026-09-14 :
+> * update easyeai-api
+>     * media_api
+>         * [update] aov
+> * update Solution
+>     * [update] aov
+>
+> 2026-08-26 :
+> * update easyeai-api
+>     * netProtocol_api
+>         * [new] rtsp_client
+> * update Solution
+>     * [new] vcic_stream
+>     * [update] rtspIPCamera
+>     * [update] rtspMulitPlayer
+>
 > 2026-08-22 :
 > * Release EASY-EAI-Toolkit-1126B-0.2.3
+> * Support Ubuntu 22.04 and Ubuntu 24.04 firmware
 > * update easyeai-api
 >     * common_api
 >         * [new] log_manager_pro
