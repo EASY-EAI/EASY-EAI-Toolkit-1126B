@@ -1,15 +1,12 @@
 # rtspIPCamera — RTSP IP 摄像头方案
 
-基于 RK_MPI（Rockchip Media Process Interface）的 RTSP IP 摄像头方案，支持人员检测 OSD 叠加。
+基于 RK_MPI（Rockchip Media Process Interface）的 RTSP IP 摄像头方案。
 
 ## 1. 功能
 
 - MIPI sensor 采集 → VI → VENC 硬件编码 → RTSP 推流
-- 支持两种工作模式（通过 `SrcCfg_tab` 中 `bOsdEnabled` 配置）：
-  - **直通模式** (`false`)：VI → VENC 直接绑定，低延迟
-  - **OSD 叠加模式** (`true`)：VI → RGA 转 BGR888 → 人员检测 → OSD 画框 → RGA 转 NV12 → VENC 编码
-- 编码码流同时推送到 RTSP 和保存为 H264/H265 文件
-- 全程零拷贝：analyzer DMA-BUF → RGA → MB_BLK → VENC，通过 fd 模式流转
+- VI chn0 直接 bind 到 VENC，由 ISP 自动送帧编码，低延迟
+- 拉流端通过 RTSP 协议预览，支持 H264 / H265
 
 ## 2. 使用方法
 
@@ -49,20 +46,6 @@ systemctl start rkaiq_3A.service
 | 依赖 | 说明 |
 |------|------|
 | `librockit.so` | RK_MPI 编解码库 |
-| `librga.so` | RGA 图形加速库 |
-| `librknnrt.so` | RKNN 运行时库 |
-| OpenCV | 图像处理库 |
-
-### 3.3 模型文件
-
-程序运行时从当前目录加载 `person_detect.model` 模型文件，需用户自行下载放置：
-
-```bash
-# 从 EasyEAI 官网下载 person_detect 模型，放置到运行目录
-cp person_detect.model /userdata/Solu/rtspIPCamera/
-```
-
-> 模型文件不在本仓库中管理，请前往 [EasyEAI 官网](http://www.easy-eai.com/) 获取对应平台的 `person_detect.model`。
 
 ## 4. 配置说明
 
@@ -77,7 +60,7 @@ static SrcCfg_t SrcCfg_tab[] = {
         .height       = 1080,
         .framerate    = 30,
         .videoEncType = "h264",
-        .bOsdEnabled  = true,   /* true=OSD叠加, false=直通 */
+        .audioEncType = "null",
     },
 };
 
@@ -85,7 +68,6 @@ static StreamCfg_t StreamCfg_tab[] = {
     {
         .rtspPort  = 8554,
         .rtspPath  = "/live/0",
-        .savePath  = "/userdata/output.h264",  /* NULL 表示不保存 */
     },
 };
 ```
